@@ -6,7 +6,15 @@ from app.schemas.auth import (
     RegisterResponse,
     TokenResponse,
 )
-from app.schemas.user import UserMeResponse
+from app.schemas.friend import (
+    AddByInviteCodeRequest,
+    FriendListResponse,
+    FriendRequestCreate,
+    FriendRequestResponse,
+    InviteCodeCreate,
+    InviteCodeResponse,
+)
+from app.schemas.user import UserMeResponse, UserPublicResponse
 
 __all__ = [
     "ConfirmEmailRequest",
@@ -15,5 +23,12 @@ __all__ = [
     "RegisterRequest",
     "RegisterResponse",
     "TokenResponse",
+    "AddByInviteCodeRequest",
+    "FriendListResponse",
+    "FriendRequestCreate",
+    "FriendRequestResponse",
+    "InviteCodeCreate",
+    "InviteCodeResponse",
     "UserMeResponse",
+    "UserPublicResponse",
 ]

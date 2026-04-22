@@ -15,3 +15,13 @@ class UserMeResponse(BaseModel):
     current_game: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class UserPublicResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    username: str
+    avatar_url: str | None
+    status: str
+    current_game: str | None
