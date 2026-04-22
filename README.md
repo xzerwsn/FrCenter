@@ -33,6 +33,10 @@ scripts/   Local helper scripts
 8. Windows desktop build.
 9. Home server deployment docs.
 
+## Local Backend
+
+See [docs/LOCAL_BACKEND.md](docs/LOCAL_BACKEND.md) for the first auth API run with PostgreSQL and Alembic migrations.
+
 ## Security Note
 
 Never commit real secrets. Copy `.env.example` to `.env` on the target server and fill in private values there.

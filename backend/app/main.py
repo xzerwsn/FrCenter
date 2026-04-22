@@ -10,7 +10,7 @@ from app.db.session import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.app_env == "development":
+    if settings.auto_create_tables:
         await init_db()
     yield
 
