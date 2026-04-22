@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     frontend_url: str = "http://localhost:5173"
     backend_url: str = "http://localhost:8000"
+    access_token_expire_minutes: int = 60 * 24 * 7
+    email_confirmation_expire_minutes: int = 30
+    sql_echo: bool = False
 
 
 settings = Settings()
