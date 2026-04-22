@@ -6,6 +6,15 @@ from app.schemas.auth import (
     RegisterResponse,
     TokenResponse,
 )
+from app.schemas.chat import (
+    ChatListResponse,
+    ChatMemberResponse,
+    ChatResponse,
+    DirectChatCreate,
+    GroupChatCreate,
+    MessageResponse as ChatMessageResponse,
+    MessageSendRequest,
+)
 from app.schemas.friend import (
     AddByInviteCodeRequest,
     FriendListResponse,
@@ -24,11 +33,18 @@ __all__ = [
     "RegisterResponse",
     "TokenResponse",
     "AddByInviteCodeRequest",
+    "ChatListResponse",
+    "ChatMemberResponse",
+    "ChatMessageResponse",
+    "ChatResponse",
+    "DirectChatCreate",
     "FriendListResponse",
     "FriendRequestCreate",
     "FriendRequestResponse",
+    "GroupChatCreate",
     "InviteCodeCreate",
     "InviteCodeResponse",
+    "MessageSendRequest",
     "UserMeResponse",
     "UserPublicResponse",
 ]
