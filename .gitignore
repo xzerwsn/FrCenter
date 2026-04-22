@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Tauri / Rust
+target/
+desktop/src-tauri/target/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local storage
+backend/app/storage/avatars/*
+backend/app/storage/encrypted_media/*
+!backend/app/storage/avatars/.gitkeep
+!backend/app/storage/encrypted_media/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

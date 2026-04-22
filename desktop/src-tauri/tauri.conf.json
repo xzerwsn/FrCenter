@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FrCenter",
+  "version": "0.1.0",
+  "identifier": "ru.frcenter.app",
+  "build": {
+    "beforeDevCommand": "cd ../frontend && npm run dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "FrCenter",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 620
+      }
+    ]
+  }
+}

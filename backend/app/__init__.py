@@ -1,0 +1,1 @@
+"""FrCenter backend application package."""
