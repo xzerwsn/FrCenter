@@ -1,20 +1,20 @@
-"""0006 add user profile fields
+"""add user profile fields
 
-Revision ID: 20260423_0006_add_user_profile_fields
-Revises: 20260423_0005_add_chat_background
-Create Date: 2026-04-23 23:30:00
+Revision ID: 0006_add_user_profile_fields
+Revises: 0005_add_chat_background
+Create Date: 2026-04-23
 """
 
-from collections.abc import Sequence
+from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "20260423_0006_add_user_profile_fields"
-down_revision: str | None = "20260423_0005_add_chat_background"
-branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
+revision: str = "0006_add_user_profile_fields"
+down_revision: Union[str, None] = "0005_add_chat_background"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
@@ -37,4 +37,3 @@ def downgrade() -> None:
     op.drop_column("users", "profile_status")
     op.drop_column("users", "nickname")
     op.drop_column("users", "display_name")
-
