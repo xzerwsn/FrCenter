@@ -759,15 +759,13 @@ function ProfilePanel({
                 </div>
                 <div className="profile-main-meta">
                   <strong>{cardName}</strong>
-                  <span>@{cardUsername}</span>
-                  <span>{cardStatus}</span>
+                  <div className="profile-main-badges">
+                    <span className="profile-main-tag">@{cardUsername}</span>
+                    <span className={`status-pill status-${normalizeStatus(status)}`}>{cardStatus}</span>
+                  </div>
                 </div>
               </div>
               <div className="profile-info-card">
-                <div className="profile-info-line profile-info-head">
-                  <span className="profile-info-name">{cardUsername}</span>
-                  <span className={`status-pill status-${normalizeStatus(status)}`}>{humanizeStatus(status)}</span>
-                </div>
                 <div className="profile-info-list">
                   <p>Текущая игра: {game}</p>
                   {"email" in profile ? <p>Email: {profile.email}</p> : null}

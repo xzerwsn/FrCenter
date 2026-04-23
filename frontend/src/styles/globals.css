@@ -184,6 +184,50 @@ button:disabled {
 .content {
   min-width: 0;
   overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-accent) 72%, var(--color-secondary-accent) 28%)
+    color-mix(in srgb, var(--color-surface-strong) 82%, transparent);
+}
+
+.content::-webkit-scrollbar {
+  width: 12px;
+}
+
+.content::-webkit-scrollbar-track {
+  margin: 8px 0;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-surface-strong) 90%, transparent),
+      color-mix(in srgb, var(--color-surface-deep) 88%, transparent)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-text) 8%, transparent),
+    inset 0 10px 20px rgb(0 0 0 / 12%);
+}
+
+.content::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-accent) 86%, white 8%),
+      color-mix(in srgb, var(--color-secondary-accent) 82%, var(--color-accent) 18%)
+    ) padding-box;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-text) 8%, transparent),
+    0 10px 24px color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-accent) 96%, white 14%),
+      color-mix(in srgb, var(--color-secondary-accent) 90%, var(--color-accent) 12%)
+    ) padding-box;
 }
 
 .topbar {
@@ -1464,15 +1508,37 @@ button:disabled {
   z-index: 1;
   padding: 10px 16px;
   display: grid;
-  gap: 2px;
+  gap: 8px;
   border-radius: 18px;
-  background: rgb(18 16 28 / 54%);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 16px 30px rgb(0 0 0 / 18%);
+  background: linear-gradient(145deg, rgb(18 16 28 / 62%), rgb(18 16 28 / 34%));
+  backdrop-filter: blur(16px);
+  box-shadow:
+    0 16px 30px rgb(0 0 0 / 18%),
+    inset 0 0 0 1px color-mix(in srgb, var(--color-text) 10%, transparent);
 }
 
 .profile-main-meta strong {
   font-size: 1.08rem;
+  color: #fff;
+}
+
+.profile-main-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.profile-main-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--color-surface) 76%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
 }
 
 .profile-main-meta span {
@@ -1521,7 +1587,6 @@ button:disabled {
 .profile-info-list {
   display: grid;
   gap: 10px;
-  margin-top: 14px;
 }
 
 .profile-info-list p {
