@@ -1830,18 +1830,63 @@ button:disabled {
 
 @media (max-width: 820px) {
   .shell {
-    grid-template-columns: 78px minmax(0, 1fr);
-    padding: 14px;
-    border-radius: 22px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 12px 12px 92px;
+    height: auto;
+    min-height: 100vh;
   }
 
   .friends {
     display: none;
   }
 
+  .sidebar {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 120;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 24px;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 18px 36px rgb(0 0 0 / 22%);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .sidebar button {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    border-radius: 16px;
+    flex: 0 0 auto;
+  }
+
+  .profile-button {
+    width: 52px !important;
+    height: 52px !important;
+  }
+
+  .brand {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .content {
+    overflow: visible;
+  }
+
   .topbar {
     align-items: stretch;
     flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding: 12px;
   }
 
   .topbar input,
@@ -1851,6 +1896,17 @@ button:disabled {
 
   .topbar-actions {
     min-width: 0;
+    justify-content: stretch;
+  }
+
+  .topbar-actions input {
+    width: 100%;
+  }
+
+  .topbar-actions button {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 auto;
   }
 
   .grid {
@@ -1859,6 +1915,10 @@ button:disabled {
 
   .tool-band {
     grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 18px;
+    padding: 16px;
+    border-radius: 22px;
   }
 
   .profile-layout-grid {
@@ -1872,15 +1932,76 @@ button:disabled {
   .chat-band {
     grid-template-columns: 1fr;
     height: auto;
+    margin-top: 18px;
+    gap: 16px;
   }
 
   .chat-list-pane,
   .chat-pane {
     height: auto;
+    padding: 16px;
+    border-radius: 22px;
   }
 
   .chat-pane {
     min-height: 420px;
+  }
+
+  .chat-list {
+    max-height: none;
+  }
+
+  .chat-row {
+    align-items: flex-start;
+  }
+
+  .chat-row-actions {
+    flex-direction: column;
+  }
+
+  .chat-pane-header {
+    align-items: flex-start;
+  }
+
+  .chat-head-left {
+    min-width: 0;
+  }
+
+  .chat-meta-pill {
+    width: 100%;
+  }
+
+  .chat-meta-profile {
+    align-items: flex-start;
+  }
+
+  .message {
+    max-width: 100%;
+  }
+
+  .composer-form {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .composer-form input {
+    min-width: 0;
+    width: 100%;
+    order: 1;
+  }
+
+  .composer-icon-button {
+    order: 0;
+  }
+
+  .composer-form > button[type="submit"] {
+    order: 2;
+    width: 100%;
+  }
+
+  .attachment-list {
+    max-height: 132px;
+    overflow: auto;
   }
 
   .inline-form {
@@ -1900,20 +2021,261 @@ button:disabled {
 
   .profile-header-card {
     min-height: auto;
+    padding: 10px;
   }
 
   .profile-banner-strip {
     inset: 12px;
   }
 
+  .profile-main-meta {
+    width: min(100%, 320px);
+  }
+
+  .profile-info-card,
+  .profile-publications-panel {
+    padding: 12px;
+  }
+
   .profile-photo-grid {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .home-feed-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .create-chat-modal,
+  .profile-modal,
+  .chat-settings-modal,
+  .chat-meta-modal {
+    width: min(100%, calc(100vw - 24px));
+    max-height: min(86vh, 760px);
   }
 }
 
 @media (max-width: 1100px) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 10px 10px 88px;
+  }
+
+  .sidebar {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .sidebar button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    border-radius: 14px;
+  }
+
+  .profile-button {
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  .brand {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .topbar p {
+    font-size: 0.98rem;
+    line-height: 1.35;
+  }
+
+  .topbar-actions {
+    gap: 10px;
+  }
+
+  .topbar-actions button {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .tool-band h2,
+  .chat-list-pane h2,
+  .chat-pane h2,
+  .chat-pane-meta h2 {
+    font-size: 1.24rem;
+  }
+
+  .chat-list-pane,
+  .chat-pane,
+  .tool-band {
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .chat-row-main {
+    gap: 10px;
+  }
+
+  .chat-row-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .chat-pane-avatar {
+    width: 38px;
+    height: 38px;
+  }
+
+  .message-list {
+    padding-right: 2px;
+  }
+
+  .message {
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .message-head {
+    gap: 8px;
+  }
+
+  .message-author {
+    min-width: 0;
+  }
+
+  .message-author b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .profile-banner-strip {
+    inset: 10px;
+  }
+
+  .profile-identity-row {
+    gap: 10px;
+    padding-inline: 8px;
+  }
+
+  .profile-avatar-ring {
+    width: 76px;
+    height: 76px;
+  }
+
+  .profile-main-meta {
+    padding: 10px 12px;
+    border-radius: 16px;
+  }
+
+  .profile-main-meta strong {
+    font-size: 1rem;
+  }
+
+  .profile-main-badges {
+    gap: 6px;
+  }
+
+  .profile-main-tag,
+  .status-pill {
+    font-size: 12px;
+  }
+
+  .profile-photo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .profile-photo-card img {
+    height: 132px;
+  }
+
+  .home-feed-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-feed-image {
+    aspect-ratio: 1 / 0.95;
+  }
+}
+
+@media (max-width: 420px) {
+  .shell {
+    padding: 8px 8px 82px;
+  }
+
+  .topbar {
+    padding: 10px;
+    border-radius: 16px;
+  }
+
+  .topbar p {
+    font-size: 0.92rem;
+  }
+
+  .tool-band,
+  .chat-list-pane,
+  .chat-pane {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 18px;
+  }
+
+  .chat-pane {
+    min-height: 360px;
+  }
+
+  .chat-pane-header {
+    gap: 8px;
+  }
+
+  .chat-meta-pill strong,
+  .chat-row-body strong {
+    font-size: 0.95rem;
+  }
+
+  .chat-row-body span,
+  .chat-meta-pill span,
+  .message-head time {
+    font-size: 11px;
+  }
+
+  .composer-form {
+    gap: 8px;
+  }
+
+  .composer-icon-button,
+  .composer-form > button[type="submit"] {
+    min-height: 42px;
+  }
+
+  .profile-avatar-ring {
+    width: 68px;
+    height: 68px;
+  }
+
+  .profile-main-meta {
+    width: 100%;
+  }
+
+  .profile-photo-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .create-chat-modal,
+  .profile-modal,
+  .chat-settings-modal,
+  .chat-meta-modal {
+    width: calc(100vw - 16px);
   }
 }
 
