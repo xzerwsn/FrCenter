@@ -706,10 +706,13 @@ function ProfilePanel({
 
   return (
     <section className="tool-band profile-band">
-      <div
-        className="profile-panel profile-layout-card"
-        style={cardBackground ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 68%), rgb(19 17 29 / 86%)), url("${cardBackground}")` } : undefined}
-      >
+      <div className="profile-panel profile-layout-card">
+        {cardBackground ? (
+          <div aria-hidden="true" className="profile-background-media">
+            <img alt="" className="profile-background-blur" src={cardBackground} />
+            <img alt="" className="profile-background-image" src={cardBackground} />
+          </div>
+        ) : null}
         <div className="profile-layout-head">
           <h2>Профиль</h2>
         </div>
@@ -749,7 +752,12 @@ function ProfilePanel({
                 </div>
               ) : null}
               <div className="profile-banner-strip">
-                {cardBanner ? <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} /> : null}
+                {cardBanner ? (
+                  <>
+                    <img alt="" aria-hidden="true" className="profile-banner-blur" src={cardBanner} />
+                    <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} />
+                  </>
+                ) : null}
               </div>
               <div className="profile-identity-row">
                 <div className={`profile-avatar-ring ring-${cardRing}`}>
