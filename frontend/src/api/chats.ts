@@ -12,6 +12,7 @@ export type Chat = {
   type: string;
   title: string | null;
   avatar_url: string | null;
+  background_url: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -44,6 +45,8 @@ export type CreateGroupChatPayload = {
   title: string;
   usernames: string[];
   encrypted_group_key?: string;
+  avatar_url?: string;
+  background_url?: string;
 };
 
 export type UpdateGroupMemberRolePayload = {
@@ -66,6 +69,8 @@ export async function createGroupChat(token: string, payload: CreateGroupChatPay
       title: payload.title,
       usernames: payload.usernames,
       encrypted_group_key: payload.encrypted_group_key ?? null,
+      avatar_url: payload.avatar_url ?? null,
+      background_url: payload.background_url ?? null,
     },
     { token },
   );

@@ -83,12 +83,20 @@ async def create_group_chat(
     title: str,
     usernames: list[str],
     encrypted_group_key: str | None,
+    avatar_url: str | None,
+    background_url: str | None,
 ) -> Chat:
     users = await _get_users_by_usernames(db, usernames)
     if len(users) != len(set(usernames)):
         raise UserNotFound
 
-    chat = Chat(type="group", title=title, created_by=current_user.id)
+    chat = Chat(
+        type="group",
+        title=title,
+        avatar_url=avatar_url,
+        background_url=background_url,
+        created_by=current_user.id,
+    )
     db.add(chat)
     await db.flush()
     db.add(ChatMember(chat_id=chat.id, user_id=current_user.id, role="owner", encrypted_group_key=encrypted_group_key))

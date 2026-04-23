@@ -7,10 +7,15 @@ import {
   Home,
   LogOut,
   MessageCircle,
+  Paperclip,
+  Pencil,
+  Pin,
+  PinOff,
   PlaySquare,
   Settings,
   UserRound,
   Users,
+  X,
 } from "lucide-react";
 
 import { confirmEmail, login, register } from "../api/auth";
@@ -49,6 +54,77 @@ type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "notifications" | "games" | "clips" | "settings";
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
+const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
+const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
+const THEME_STORAGE_KEY = "frcenter.siteTheme";
+
+type SiteTheme = {
+  id: string;
+  name: string;
+  background: string;
+  surface: string;
+  text: string;
+  accent: string;
+  secondaryAccent: string;
+};
+
+const SITE_THEMES: SiteTheme[] = [
+  {
+    id: "chinese-black-warm-accents",
+    name: "Китайский чёрный (Chinese Black & Warm Accents)",
+    background: "#0C1519",
+    surface: "#162127",
+    text: "#3A3534",
+    accent: "#724B39",
+    secondaryAccent: "#CF9D7B",
+  },
+  {
+    id: "ocean",
+    name: "Океан (Ocean)",
+    background: "#24292E",
+    surface: "#4A5156",
+    text: "#808A92",
+    accent: "#BDC7CE",
+    // Ocean palette in request includes 4 unique HEX values, so secondary accent reuses Blue Dolphin.
+    secondaryAccent: "#808A92",
+  },
+  {
+    id: "ashes",
+    name: "Пепел (Ashes)",
+    background: "#B7B4AE",
+    surface: "#726E68",
+    text: "#33312F",
+    accent: "#371E1E",
+    secondaryAccent: "#0A0A0A",
+  },
+  {
+    id: "back-in-black",
+    name: "Снова в чёрном (Back in Black)",
+    background: "#16131F",
+    surface: "#F0D9E4",
+    text: "#C1A0AC",
+    accent: "#4A3F4B",
+    secondaryAccent: "#806C79",
+  },
+  {
+    id: "berries",
+    name: "Ягоды (Berries)",
+    background: "#1D2B38",
+    surface: "#526161",
+    text: "#6F3742",
+    accent: "#B6ADA2",
+    secondaryAccent: "#C36765",
+  },
+  {
+    id: "northern-lights",
+    name: "Северное сияние (Northern Lights)",
+    background: "#1F0922",
+    surface: "#4B2B55",
+    text: "#6F7074",
+    accent: "#89B199",
+    secondaryAccent: "#CAD5D4",
+  },
+];
 
 type MessageContextMenuState = {
   message: Message;
@@ -61,6 +137,13 @@ function App() {
   const [authMode, setAuthMode] = React.useState<AuthMode>("login");
   const [pendingEmail, setPendingEmail] = React.useState("");
   const [devCode, setDevCode] = React.useState<string | null>(null);
+  const [themeId, setThemeId] = React.useState<string>(() => loadStoredThemeId());
+  const activeTheme = React.useMemo(() => SITE_THEMES.find((theme) => theme.id === themeId) ?? SITE_THEMES[0], [themeId]);
+
+  React.useEffect(() => {
+    applyTheme(activeTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, activeTheme.id);
+  }, [activeTheme]);
 
   async function handleAuthenticated(token: string, cloudPassword: string) {
     const user = await getMe(token);
@@ -111,6 +194,8 @@ function App() {
     <Dashboard
       session={session}
       onLogout={handleLogout}
+      themeId={activeTheme.id}
+      onThemeChange={setThemeId}
     />
   );
 }
@@ -302,9 +387,13 @@ function ConfirmForm({
 function Dashboard({
   session,
   onLogout,
+  themeId,
+  onThemeChange,
 }: {
   session: Session;
   onLogout: () => void;
+  themeId: string;
+  onThemeChange: (themeId: string) => void;
 }) {
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [section, setSection] = React.useState<DashboardSection>("home");
@@ -390,7 +479,7 @@ function Dashboard({
         {section === "notifications" ? <NotificationsPanel /> : null}
         {section === "games" ? <GamesPanel friends={friends} /> : null}
         {section === "clips" ? <ClipsPanel friends={friends} /> : null}
-        {section === "settings" ? <SettingsPanel /> : null}
+        {section === "settings" ? <SettingsPanel themeId={themeId} onThemeChange={onThemeChange} /> : null}
       </section>
 
       <aside className="friends">
@@ -515,21 +604,47 @@ function ClipsPanel({ friends }: { friends: UserPublic[] }) {
 }
 
 function SettingsPanel({
+  themeId,
+  onThemeChange,
 }: {
+  themeId: string;
+  onThemeChange: (themeId: string) => void;
 }) {
-  const [darkTheme, setDarkTheme] = React.useState(true);
   const [autoStart, setAutoStart] = React.useState(false);
   const [notifEnabled, setNotifEnabled] = React.useState(true);
 
   return (
     <section className="tool-band">
       <div>
-        <h2>Настройки</h2>
+        <h2>Темы</h2>
+        <div className="theme-grid">
+          {SITE_THEMES.map((theme) => (
+            <button
+              className={`theme-card ${themeId === theme.id ? "active" : ""}`}
+              key={theme.id}
+              onClick={() => onThemeChange(theme.id)}
+              type="button"
+            >
+              <div className="theme-card-swatches">
+                <span style={{ backgroundColor: theme.background }} />
+                <span style={{ backgroundColor: theme.surface }} />
+                <span style={{ backgroundColor: theme.text }} />
+                <span style={{ backgroundColor: theme.accent }} />
+                <span style={{ backgroundColor: theme.secondaryAccent }} />
+              </div>
+              <strong>{theme.name}</strong>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h2>Параметры</h2>
+        <p className="form-status">1 цвет: фон сайта</p>
+        <p className="form-status">2 цвет: карточки, хедер, футер</p>
+        <p className="form-status">3 цвет: текст и иконки</p>
+        <p className="form-status">4 цвет: кнопки, ссылки, активные элементы</p>
+        <p className="form-status">5 цвет: hover, обводки, бейджи</p>
         <div className="result-list">
-          <label className="result-row">
-            <span>Темная тема</span>
-            <input checked={darkTheme} onChange={() => setDarkTheme((v) => !v)} type="checkbox" />
-          </label>
           <label className="result-row">
             <span>Запуск вместе с Windows</span>
             <input checked={autoStart} onChange={() => setAutoStart((v) => !v)} type="checkbox" />
@@ -539,8 +654,6 @@ function SettingsPanel({
             <input checked={notifEnabled} onChange={() => setNotifEnabled((v) => !v)} type="checkbox" />
           </label>
         </div>
-      </div>
-      <div>
         <h2>Безопасность</h2>
         <p className="form-status">Сквозное шифрование работает автоматически.</p>
         <p className="form-status">Ключи создаются и обновляются без ручных действий пользователя.</p>
@@ -711,26 +824,56 @@ function ChatsPanel({
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
   const [attachmentFile, setAttachmentFile] = React.useState<File | null>(null);
+  const [composerDragActive, setComposerDragActive] = React.useState(false);
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
-  const [directUsername, setDirectUsername] = React.useState("");
-  const [groupTitle, setGroupTitle] = React.useState("");
-  const [groupUsernames, setGroupUsernames] = React.useState<string[]>([]);
+  const [createChatOpen, setCreateChatOpen] = React.useState(false);
+  const [createChatTitle, setCreateChatTitle] = React.useState("");
+  const [chatParticipants, setChatParticipants] = React.useState<string[]>([]);
+  const [chatAvatarDataUrl, setChatAvatarDataUrl] = React.useState("");
+  const [chatBackgroundDataUrl, setChatBackgroundDataUrl] = React.useState("");
   const [memberUsername, setMemberUsername] = React.useState("");
-  const [directDropdownOpen, setDirectDropdownOpen] = React.useState(false);
-  const [groupDropdownOpen, setGroupDropdownOpen] = React.useState(false);
+  const [createParticipantsDropdownOpen, setCreateParticipantsDropdownOpen] = React.useState(false);
   const [groupSettingsOpen, setGroupSettingsOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<MessageContextMenuState | null>(null);
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState<string | null>(null);
   const [previewMediaType, setPreviewMediaType] = React.useState<string>("");
+  const [pinnedChatIds, setPinnedChatIds] = React.useState<string[]>(() => readStoredStringList(PINNED_CHATS_STORAGE_KEY));
+  const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
-  const directDropdownRef = React.useRef<HTMLDivElement | null>(null);
-  const groupDropdownRef = React.useRef<HTMLDivElement | null>(null);
+
+  const createParticipantsDropdownRef = React.useRef<HTMLDivElement | null>(null);
+  const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
+  const avatarInputRef = React.useRef<HTMLInputElement | null>(null);
+  const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
-  const selectedChat = chats.find((chat) => chat.id === selectedChatId) ?? null;
+
+  const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
+  const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
+  const orderedChats = React.useMemo(() => {
+    return [...visibleChats].sort((left, right) => {
+      const leftPinned = pinnedChatSet.has(left.id) ? 1 : 0;
+      const rightPinned = pinnedChatSet.has(right.id) ? 1 : 0;
+      if (leftPinned !== rightPinned) {
+        return rightPinned - leftPinned;
+      }
+      return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
+    });
+  }, [visibleChats, pinnedChatSet]);
+
+  const selectedChat = orderedChats.find((chat) => chat.id === selectedChatId) ?? null;
+  const selectedChatMeta = selectedChat ? getChatPresentation(selectedChat, me) : null;
   const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
   const canModerateAllMessages = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
+  const chatPaneStyle: React.CSSProperties | undefined = selectedChat?.background_url
+    ? {
+        backgroundImage: `linear-gradient(rgb(75 18 32 / 80%), rgb(75 18 32 / 90%)), url("${selectedChat.background_url}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : undefined;
+
   const scrollToBottom = React.useCallback(() => {
     const messageListElement = messageListRef.current;
     if (!messageListElement) {
@@ -746,8 +889,22 @@ function ChatsPanel({
   }, [token]);
 
   React.useEffect(() => {
+    if (orderedChats.length === 0) {
+      if (selectedChatId) {
+        setSelectedChatId("");
+      }
+      return;
+    }
+    if (orderedChats.some((chat) => chat.id === selectedChatId)) {
+      return;
+    }
+    setSelectedChatId(orderedChats[0].id);
+  }, [orderedChats, selectedChatId]);
+
+  React.useEffect(() => {
     if (!selectedChatId) {
       setMessages([]);
+      setDecodeMap({});
       return;
     }
     void listChatMessages(token, selectedChatId).then(setMessages);
@@ -788,11 +945,8 @@ function ChatsPanel({
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       const targetNode = event.target as Node;
-      if (directDropdownRef.current && !directDropdownRef.current.contains(targetNode)) {
-        setDirectDropdownOpen(false);
-      }
-      if (groupDropdownRef.current && !groupDropdownRef.current.contains(targetNode)) {
-        setGroupDropdownOpen(false);
+      if (createParticipantsDropdownRef.current && !createParticipantsDropdownRef.current.contains(targetNode)) {
+        setCreateParticipantsDropdownOpen(false);
       }
       setContextMenu(null);
     }
@@ -812,15 +966,20 @@ function ChatsPanel({
   }, [selectedChat?.type]);
 
   React.useEffect(() => {
+    writeStoredStringList(PINNED_CHATS_STORAGE_KEY, pinnedChatIds);
+  }, [pinnedChatIds]);
+
+  React.useEffect(() => {
+    writeStoredStringList(HIDDEN_CHATS_STORAGE_KEY, hiddenChatIds);
+  }, [hiddenChatIds]);
+
+  React.useEffect(() => {
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
   async function reloadChats() {
     const response = await listChats(token);
     setChats(response.chats);
-    if (!selectedChatId && response.chats.length > 0) {
-      setSelectedChatId(response.chats[0].id);
-    }
   }
 
   async function decodeMessages(items: Message[]) {
@@ -839,8 +998,8 @@ function ChatsPanel({
     setDecodeMap(decoded);
   }
 
-  function toggleGroupUsername(username: string) {
-    setGroupUsernames((current) => {
+  function toggleParticipant(username: string) {
+    setChatParticipants((current) => {
       if (current.includes(username)) {
         return current.filter((item) => item !== username);
       }
@@ -898,45 +1057,48 @@ function ChatsPanel({
     }
   }
 
-  async function handleCreateDirect(event: React.FormEvent) {
+  async function handleCreateChat(event: React.FormEvent) {
     event.preventDefault();
-    if (!directUsername.trim()) {
-      setStatus("Выбери друга");
+    const usernames = Array.from(new Set(chatParticipants.map((item) => item.trim()).filter((item) => item.length > 0)));
+    if (usernames.length === 0) {
+      setStatus("Выбери хотя бы одного участника");
       return;
     }
-    setStatus("Создаем direct-чат...");
+
+    const title = createChatTitle.trim();
+    const hasCustomMedia = Boolean(chatAvatarDataUrl || chatBackgroundDataUrl);
+    const isDirectCreate = usernames.length === 1 && !title && !hasCustomMedia;
+
+    if (!isDirectCreate && !title) {
+      setStatus("Укажи название группы");
+      return;
+    }
+
+    setStatus(isDirectCreate ? "Создаем чат..." : "Создаем групповой чат...");
     try {
-      const chat = await createDirectChat(token, directUsername.trim());
-      setDirectUsername("");
-      setDirectDropdownOpen(false);
+      const chat = isDirectCreate
+        ? await createDirectChat(token, usernames[0])
+        : await createGroupChat(token, {
+            title,
+            usernames,
+            avatar_url: chatAvatarDataUrl || undefined,
+            background_url: chatBackgroundDataUrl || undefined,
+          });
+
+      setHiddenChatIds((current) => current.filter((item) => item !== chat.id));
+
+      setCreateChatTitle("");
+      setChatParticipants([]);
+      setChatAvatarDataUrl("");
+      setChatBackgroundDataUrl("");
+      setCreateParticipantsDropdownOpen(false);
+      setCreateChatOpen(false);
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
-      setStatus("Direct-чат готов");
+      setStatus(isDirectCreate ? "Чат создан" : "Групповой чат готов");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось создать чат");
-    }
-  }
-
-  async function handleCreateGroup(event: React.FormEvent) {
-    event.preventDefault();
-    setStatus("Создаем групповой чат...");
-    try {
-      const usernames = Array.from(new Set(groupUsernames.map((item) => item.trim()).filter((item) => item.length > 0)));
-      if (usernames.length === 0) {
-        setStatus("Выбери хотя бы одного друга");
-        return;
-      }
-      const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames });
-      setGroupTitle("");
-      setGroupUsernames([]);
-      setGroupDropdownOpen(false);
-      await ensureChatKey(chat.id);
-      await reloadChats();
-      setSelectedChatId(chat.id);
-      setStatus("Групповой чат готов");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось создать групповой чат");
     }
   }
 
@@ -988,124 +1150,291 @@ function ChatsPanel({
     }
   }
 
-  async function handleSendMessage(event: React.FormEvent) {
+  async function sendEncryptedText(text: string) {
+    if (!selectedChatId) {
+      throw new Error("Чат не выбран");
+    }
+    const key = await ensureChatKey(selectedChatId);
+    const encrypted = await encryptTextForSharedKey(text, key);
+    await sendChatMessage(token, selectedChatId, {
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      message_type: "text",
+    });
+  }
+
+  async function sendEncryptedAttachment(file: File) {
+    if (!selectedChatId) {
+      throw new Error("Чат не выбран");
+    }
+    const chatKey = await ensureChatKey(selectedChatId);
+    const fileBytes = new Uint8Array(await file.arrayBuffer());
+    const encryptedFile = await encryptBytesForSharedKey(fileBytes, chatKey);
+    const encryptedBuffer = new ArrayBuffer(encryptedFile.ciphertextBytes.byteLength);
+    new Uint8Array(encryptedBuffer).set(encryptedFile.ciphertextBytes);
+    const encryptedBlob = new Blob([encryptedBuffer], { type: "application/octet-stream" });
+    const encryptedFileObject = new File([encryptedBlob], `${file.name}.enc`, { type: "application/octet-stream" });
+    const media = await uploadEncryptedMedia(token, selectedChatId, encryptedFileObject);
+    const encryptedPayload = await encryptTextForSharedKey(
+      JSON.stringify({
+        kind: "media",
+        media_id: media.media_id,
+        media_url: media.media_url,
+        file_name: file.name,
+        file_size: file.size,
+        file_mime: file.type || "application/octet-stream",
+        file_nonce: encryptedFile.nonce,
+      }),
+      chatKey,
+    );
+    await sendChatMessage(token, selectedChatId, {
+      ciphertext: encryptedPayload.ciphertext,
+      nonce: encryptedPayload.nonce,
+      message_type: "media",
+    });
+  }
+
+  async function handleSendComposer(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedChatId) {
       return;
     }
-    setStatus("Отправляем сообщение...");
+
+    const text = messageText.trim();
+    if (!text && !attachmentFile) {
+      setStatus("Введите сообщение или прикрепите файл");
+      return;
+    }
+
     try {
-      const key = await ensureChatKey(selectedChatId);
-      const encrypted = await encryptTextForSharedKey(messageText, key);
-      await sendChatMessage(token, selectedChatId, {
-        ciphertext: encrypted.ciphertext,
-        nonce: encrypted.nonce,
-        message_type: "text",
-      });
+      if (text) {
+        setStatus("Отправляем сообщение...");
+        await sendEncryptedText(text);
+      }
+      if (attachmentFile) {
+        setStatus("Шифруем и отправляем вложение...");
+        await sendEncryptedAttachment(attachmentFile);
+      }
       setMessageText("");
+      setAttachmentFile(null);
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
     }
   }
 
-  async function handleSendAttachment(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selectedChatId || !attachmentFile) {
+  async function handleCreateAvatarChange(file: File | null) {
+    if (!file) {
+      setChatAvatarDataUrl("");
       return;
     }
-    setStatus("Шифруем и отправляем вложение...");
     try {
-      const chatKey = await ensureChatKey(selectedChatId);
-      const fileBytes = new Uint8Array(await attachmentFile.arrayBuffer());
-      const encryptedFile = await encryptBytesForSharedKey(fileBytes, chatKey);
-      const encryptedBuffer = new ArrayBuffer(encryptedFile.ciphertextBytes.byteLength);
-      new Uint8Array(encryptedBuffer).set(encryptedFile.ciphertextBytes);
-      const encryptedBlob = new Blob([encryptedBuffer], { type: "application/octet-stream" });
-      const encryptedFileObject = new File([encryptedBlob], `${attachmentFile.name}.enc`, { type: "application/octet-stream" });
-      const media = await uploadEncryptedMedia(token, selectedChatId, encryptedFileObject);
-      const encryptedPayload = await encryptTextForSharedKey(
-        JSON.stringify({
-          kind: "media",
-          media_id: media.media_id,
-          media_url: media.media_url,
-          file_name: attachmentFile.name,
-          file_size: attachmentFile.size,
-          file_mime: attachmentFile.type || "application/octet-stream",
-          file_nonce: encryptedFile.nonce,
-        }),
-        chatKey,
-      );
-      await sendChatMessage(token, selectedChatId, {
-        ciphertext: encryptedPayload.ciphertext,
-        nonce: encryptedPayload.nonce,
-        message_type: "media",
-      });
-      setAttachmentFile(null);
-      setStatus("Вложение отправлено");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось отправить вложение");
+      setChatAvatarDataUrl(await fileToDataUrl(file));
+    } catch {
+      setStatus("Не удалось загрузить аватар");
     }
   }
 
+  async function handleCreateBackgroundChange(file: File | null) {
+    if (!file) {
+      setChatBackgroundDataUrl("");
+      return;
+    }
+    try {
+      setChatBackgroundDataUrl(await fileToDataUrl(file));
+    } catch {
+      setStatus("Не удалось загрузить фон");
+    }
+  }
+
+  function handleTogglePin(chatId: string) {
+    setPinnedChatIds((current) => {
+      if (current.includes(chatId)) {
+        return current.filter((item) => item !== chatId);
+      }
+      return [chatId, ...current];
+    });
+  }
+
+  async function handleLeaveChat(chat: Chat) {
+    const title = getChatPresentation(chat, me).title;
+    if (!window.confirm(`Выйти из чата "${title}"?`)) {
+      return;
+    }
+
+    if (chat.type === "group") {
+      setStatus("Выходим из чата...");
+      try {
+        await removeGroupMember(token, chat.id, me.id);
+        setPinnedChatIds((current) => current.filter((item) => item !== chat.id));
+        await reloadChats();
+        setStatus("Вы вышли из чата");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Не удалось выйти из чата");
+      }
+      return;
+    }
+
+    setHiddenChatIds((current) => (current.includes(chat.id) ? current : [...current, chat.id]));
+    setPinnedChatIds((current) => current.filter((item) => item !== chat.id));
+    setStatus("Чат скрыт");
+  }
+
   return (
-    <section className={`chat-band ${selectedChat?.type === "direct" ? "direct-full-height" : ""}`}>
+    <section className="chat-band">
       <div className="chat-list-pane">
-        <h2>Чаты</h2>
-        <form className="inline-form" onSubmit={handleCreateDirect}>
-          <div className="friend-select" ref={directDropdownRef}>
-            <button className="friend-select-trigger" onClick={() => setDirectDropdownOpen((open) => !open)} type="button">
-              <span>{directUsername || "Username друга"}</span>
-              <ChevronDown size={16} />
-            </button>
-            <div className={`friend-select-dropdown ${directDropdownOpen ? "open" : ""}`}>
-              {friends.map((friend) => (
-                <button
-                  className="friend-select-item"
-                  key={friend.id}
-                  onClick={() => {
-                    setDirectUsername(friend.username);
-                    setDirectDropdownOpen(false);
-                  }}
-                  type="button"
-                >
-                  {friend.username}
-                </button>
-              ))}
+        <div className="chat-list-header">
+          <h2>Чаты</h2>
+          <button
+            aria-label="Создать чат"
+            className={`create-chat-fab ${createChatOpen ? "open" : ""}`}
+            onClick={() => setCreateChatOpen((open) => !open)}
+            type="button"
+          >
+            <Pencil size={16} />
+          </button>
+        </div>
+
+        {createChatOpen ? (
+          <form className="create-chat-form" onSubmit={handleCreateChat}>
+            <div className="friend-select" ref={createParticipantsDropdownRef}>
+              <button
+                className="friend-select-trigger"
+                onClick={() => setCreateParticipantsDropdownOpen((open) => !open)}
+                type="button"
+              >
+                <span>{chatParticipants.length > 0 ? chatParticipants.join(", ") : "Выбери участников"}</span>
+                <ChevronDown size={16} />
+              </button>
+              <div className={`friend-select-dropdown ${createParticipantsDropdownOpen ? "open" : ""}`}>
+                {friends.map((friend) => (
+                  <button
+                    className={`friend-select-item ${chatParticipants.includes(friend.username) ? "selected" : ""}`}
+                    key={friend.id}
+                    onClick={() => toggleParticipant(friend.username)}
+                    type="button"
+                  >
+                    {friend.username}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <button type="submit">Direct</button>
-        </form>
-        <form className="inline-form stacked" onSubmit={handleCreateGroup}>
-          <input placeholder="Название группы" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
-          <div className="friend-select" ref={groupDropdownRef}>
-            <button className="friend-select-trigger" onClick={() => setGroupDropdownOpen((open) => !open)} type="button">
-              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username друга"}</span>
-              <ChevronDown size={16} />
-            </button>
-            <div className={`friend-select-dropdown ${groupDropdownOpen ? "open" : ""}`}>
-              {friends.map((friend) => (
-                <label className="friend-select-item friend-select-check" key={friend.id}>
-                  <input checked={groupUsernames.includes(friend.username)} onChange={() => toggleGroupUsername(friend.username)} type="checkbox" />
-                  <span>{friend.username}</span>
-                </label>
-              ))}
+
+            <input
+              className="compact-input"
+              maxLength={120}
+              onChange={(event) => setCreateChatTitle(event.target.value)}
+              placeholder="Название группы"
+              value={createChatTitle}
+            />
+
+            <div className="create-chat-media">
+              <button onClick={() => avatarInputRef.current?.click()} type="button">
+                Аватар чата
+              </button>
+              <button onClick={() => backgroundInputRef.current?.click()} type="button">
+                Фон чата (необязательно)
+              </button>
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handleCreateAvatarChange(event.target.files?.[0] ?? null)}
+                ref={avatarInputRef}
+                type="file"
+              />
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handleCreateBackgroundChange(event.target.files?.[0] ?? null)}
+                ref={backgroundInputRef}
+                type="file"
+              />
             </div>
-          </div>
-          <button type="submit">Создать группу</button>
-        </form>
+
+            {chatAvatarDataUrl || chatBackgroundDataUrl ? (
+              <div className="create-chat-previews">
+                {chatAvatarDataUrl ? (
+                  <div className="create-chat-preview-card">
+                    <span>Аватар</span>
+                    <img alt="Аватар чата" src={chatAvatarDataUrl} />
+                  </div>
+                ) : null}
+                {chatBackgroundDataUrl ? (
+                  <div className="create-chat-preview-card">
+                    <span>Фон</span>
+                    <img alt="Фон чата" src={chatBackgroundDataUrl} />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <button type="submit">Создать чат</button>
+          </form>
+        ) : null}
+
         <div className="chat-list">
-          {chats.map((chat) => (
-            <button className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id} onClick={() => setSelectedChatId(chat.id)} type="button">
-              <strong>{chat.type === "group" ? chat.title ?? "Группа" : "Direct chat"}</strong>
-              <span>{chat.members.length} участника</span>
-            </button>
-          ))}
+          {orderedChats.map((chat) => {
+            const chatMeta = getChatPresentation(chat, me);
+            const isPinned = pinnedChatSet.has(chat.id);
+            return (
+              <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
+                <button className="chat-row-main" onClick={() => setSelectedChatId(chat.id)} type="button">
+                  <div className="chat-row-avatar">
+                    {chatMeta.avatarUrl ? (
+                      <img alt={chatMeta.title} src={chatMeta.avatarUrl} />
+                    ) : (
+                      chatMeta.initials
+                    )}
+                  </div>
+                  <div className="chat-row-body">
+                    <strong>{chatMeta.title}</strong>
+                    <span>{chatMeta.subtitle}</span>
+                  </div>
+                </button>
+                <div className="chat-row-actions">
+                  <button
+                    aria-label={isPinned ? "Открепить чат" : "Закрепить чат"}
+                    className="chat-row-icon"
+                    onClick={() => handleTogglePin(chat.id)}
+                    type="button"
+                  >
+                    {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                  </button>
+                  <button
+                    aria-label="Выйти из чата"
+                    className="chat-row-icon"
+                    onClick={() => void handleLeaveChat(chat)}
+                    type="button"
+                  >
+                    <LogOut size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {orderedChats.length === 0 ? <p className="form-status">Чатов пока нет</p> : null}
         </div>
       </div>
 
-      <div className="chat-pane">
-        <h2>Сообщения</h2>
+      <div className="chat-pane" style={chatPaneStyle}>
+        {selectedChatMeta ? (
+          <div className="chat-pane-header">
+            <div className="chat-pane-avatar">
+              {selectedChatMeta.avatarUrl ? (
+                <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} />
+              ) : (
+                selectedChatMeta.initials
+              )}
+            </div>
+            <div className="chat-pane-meta">
+              <h2>{selectedChatMeta.title}</h2>
+              <span>{selectedChatMeta.subtitle}</span>
+            </div>
+          </div>
+        ) : (
+          <h2>Сообщения</h2>
+        )}
+
         {selectedChat?.type === "group" ? (
           <div className="chat-settings">
             <button className="chat-settings-toggle" onClick={() => setGroupSettingsOpen((open) => !open)} type="button">
@@ -1118,12 +1447,12 @@ function ChatsPanel({
                 {canManageMembers ? (
                   <form className="inline-form" onSubmit={handleAddMember}>
                     <input
-                      placeholder="Username участника"
-                      value={memberUsername}
-                      onChange={(event) => setMemberUsername(event.target.value)}
-                      minLength={3}
                       maxLength={32}
+                      minLength={3}
+                      onChange={(event) => setMemberUsername(event.target.value)}
+                      placeholder="Username участника"
                       required
+                      value={memberUsername}
                     />
                     <button type="submit">Добавить</button>
                   </form>
@@ -1196,7 +1525,9 @@ function ChatsPanel({
               )}
             </div>
           ))}
+          {selectedChatId && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
         </div>
+
         {contextMenu ? (
           <div
             className="message-context-menu"
@@ -1225,19 +1556,71 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        <form className="inline-form" onSubmit={handleSendMessage}>
-          <input placeholder="Сообщение" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
-          <button disabled={!selectedChatId} type="submit">
+        <form
+          className={`composer-form ${composerDragActive ? "drag-active" : ""}`}
+          onDragLeave={(event) => {
+            const related = event.relatedTarget as Node | null;
+            if (!event.currentTarget.contains(related)) {
+              setComposerDragActive(false);
+            }
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            if (!selectedChatId) {
+              return;
+            }
+            setComposerDragActive(true);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (!selectedChatId) {
+              return;
+            }
+            setComposerDragActive(false);
+            const droppedFile = event.dataTransfer.files?.[0] ?? null;
+            if (droppedFile) {
+              setAttachmentFile(droppedFile);
+            }
+          }}
+          onSubmit={handleSendComposer}
+        >
+          <input
+            onChange={(event) => setMessageText(event.target.value)}
+            placeholder="Сообщение"
+            value={messageText}
+          />
+          <input
+            accept="*/*"
+            className="visually-hidden"
+            onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)}
+            ref={attachmentInputRef}
+            type="file"
+          />
+          <button
+            aria-label="Прикрепить файл"
+            className="composer-icon-button"
+            disabled={!selectedChatId}
+            onClick={() => attachmentInputRef.current?.click()}
+            type="button"
+          >
+            <Paperclip size={16} />
+          </button>
+          <button disabled={!selectedChatId || (!messageText.trim() && !attachmentFile)} type="submit">
             Отправить
           </button>
         </form>
-        <form className="inline-form" onSubmit={handleSendAttachment}>
-          <input accept="*/*" onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)} type="file" />
-          <button disabled={!selectedChatId || !attachmentFile} type="submit">
-            Отправить файл
-          </button>
-        </form>
+
+        {attachmentFile ? (
+          <div className="attachment-chip">
+            <span>{attachmentFile.name}</span>
+            <button aria-label="Убрать файл" onClick={() => setAttachmentFile(null)} type="button">
+              <X size={14} />
+            </button>
+          </div>
+        ) : null}
+
         {status ? <p className="form-status">{status}</p> : null}
+
         {previewMediaUrl ? (
           <div
             className="media-preview-overlay"
@@ -1265,7 +1648,6 @@ function ChatsPanel({
     </section>
   );
 }
-
 function MediaMessageView({
   chatId,
   onMediaReady,
@@ -1339,16 +1721,17 @@ function MediaMessageView({
     <div className="media-message">
       {mediaError ? <p>{mediaError}</p> : null}
       {!mediaError && !mediaUrl ? <p>Загружаем медиа...</p> : null}
-      {mediaUrl && isImage ? <img alt={mediaPayload.file_name} className="media-inline-preview" src={mediaUrl} /> : null}
+      {mediaUrl && isImage ? (
+        <button className="media-inline-trigger" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} type="button">
+          <img alt={mediaPayload.file_name} className="media-inline-preview" src={mediaUrl} />
+        </button>
+      ) : null}
       {mediaUrl && isVideo ? <video className="media-inline-preview" controls src={mediaUrl} /> : null}
       {mediaUrl && isAudio ? <audio className="media-inline-audio" controls src={mediaUrl} /> : null}
-      <p>
-        Файл: {mediaPayload.file_name} ({formatBytes(mediaPayload.file_size)})
-      </p>
-      {mediaUrl ? (
-        <button className="inline-action" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} type="button">
-          Открыть
-        </button>
+      {mediaUrl && !isImage && !isVideo && !isAudio ? (
+        <span className="media-file-link" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} role="button" tabIndex={0}>
+          Вложение
+        </span>
       ) : null}
     </div>
   );
@@ -1387,6 +1770,154 @@ function parseMediaPayload(raw: string): MediaPayload | null {
   }
 }
 
+function loadStoredThemeId(): string {
+  const fallback = SITE_THEMES[0].id;
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (!saved) {
+      return fallback;
+    }
+    return SITE_THEMES.some((theme) => theme.id === saved) ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function applyTheme(theme: SiteTheme): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const vars = buildThemeVars(theme);
+  const root = document.documentElement;
+  Object.entries(vars).forEach(([name, value]) => {
+    root.style.setProperty(name, value);
+  });
+}
+
+function buildThemeVars(theme: SiteTheme): Record<string, string> {
+  return {
+    "--color-bg": theme.background,
+    "--color-surface": theme.surface,
+    "--color-text": theme.text,
+    "--color-accent": theme.accent,
+    "--color-accent-2": theme.secondaryAccent,
+    "--color-surface-strong": mixHex(theme.surface, theme.background, 0.44),
+    "--color-surface-deep": mixHex(theme.surface, "#000000", 0.42),
+    "--color-input": mixHex(theme.surface, "#000000", 0.2),
+    "--color-text-muted": mixHex(theme.text, theme.surface, 0.34),
+    "--color-button-text": pickReadableText(theme.accent),
+    "--color-border": theme.secondaryAccent,
+    "--color-accent-hover": mixHex(theme.secondaryAccent, "#000000", 0.16),
+  };
+}
+
+function pickReadableText(backgroundHex: string): string {
+  const rgb = hexToRgb(backgroundHex);
+  if (!rgb) {
+    return "#0F0F0F";
+  }
+  const luma = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  return luma > 0.55 ? "#111111" : "#F8F8F8";
+}
+
+function mixHex(firstHex: string, secondHex: string, ratio: number): string {
+  const first = hexToRgb(firstHex);
+  const second = hexToRgb(secondHex);
+  if (!first || !second) {
+    return firstHex;
+  }
+  const safeRatio = Math.max(0, Math.min(1, ratio));
+  return rgbToHex({
+    r: Math.round(first.r * (1 - safeRatio) + second.r * safeRatio),
+    g: Math.round(first.g * (1 - safeRatio) + second.g * safeRatio),
+    b: Math.round(first.b * (1 - safeRatio) + second.b * safeRatio),
+  });
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim().replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+  const value = Number.parseInt(normalized, 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255,
+  };
+}
+
+function rgbToHex(rgb: { r: number; g: number; b: number }): string {
+  const clamp = (value: number) => Math.max(0, Math.min(255, value));
+  const toHex = (value: number) => clamp(value).toString(16).padStart(2, "0");
+  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
+}
+
+function getChatPresentation(chat: Chat, me: CurrentUser): {
+  title: string;
+  subtitle: string;
+  avatarUrl: string | null;
+  initials: string;
+} {
+  if (chat.type === "direct") {
+    const peer = chat.members.find((member) => member.user.id !== me.id)?.user ?? null;
+    const title = peer?.username ?? "Личный чат";
+    return {
+      title,
+      subtitle: "1 на 1",
+      avatarUrl: peer?.avatar_url ?? null,
+      initials: title.slice(0, 1).toUpperCase(),
+    };
+  }
+  const title = chat.title?.trim() || "Группа";
+  return {
+    title,
+    subtitle: `${chat.members.length} участника`,
+    avatarUrl: chat.avatar_url,
+    initials: title.slice(0, 1).toUpperCase(),
+  };
+}
+
+function readStoredStringList(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredStringList(key: string, values: string[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = reader.result;
+      if (typeof value === "string") {
+        resolve(value);
+        return;
+      }
+      reject(new Error("Failed to convert file to data URL"));
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function normalizeStatus(status: string | null | undefined): "online" | "offline" | "dnd" | "away" {
   if (status === "online" || status === "offline" || status === "dnd" || status === "away") {
     return status;
@@ -1406,20 +1937,6 @@ function humanizeStatus(status: string | null | undefined): string {
     return "отошел";
   }
   return "не в сети";
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0 B";
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  const kb = value / 1024;
-  if (kb < 1024) {
-    return `${kb.toFixed(1)} KB`;
-  }
-  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 function formatMessageTime(value: string): string {
@@ -1445,5 +1962,3 @@ async function deriveDeterministicChatKey(chatId: string): Promise<string> {
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
-
-

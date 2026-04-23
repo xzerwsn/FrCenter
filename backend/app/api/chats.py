@@ -78,6 +78,8 @@ async def create_group(
             payload.title,
             payload.usernames,
             payload.encrypted_group_key,
+            payload.avatar_url,
+            payload.background_url,
         )
     except UserNotFound as exc:
         raise HTTPException(status_code=404, detail="One or more users were not found") from exc

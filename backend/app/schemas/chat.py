@@ -13,6 +13,8 @@ class GroupChatCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     usernames: list[str] = Field(min_length=1, max_length=100)
     encrypted_group_key: str | None = None
+    avatar_url: str | None = None
+    background_url: str | None = None
 
 
 class ChatMemberAddRequest(BaseModel):
@@ -45,6 +47,7 @@ class ChatResponse(BaseModel):
     type: str
     title: str | None
     avatar_url: str | None
+    background_url: str | None
     created_by: str
     created_at: datetime
     updated_at: datetime
