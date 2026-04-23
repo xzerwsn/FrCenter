@@ -27,6 +27,7 @@ backend/app/storage/encrypted_media/*
 !backend/app/storage/avatars/.gitkeep
 !backend/app/storage/encrypted_media/.gitkeep
 backend/*.log
+frontend/*.log
 
 # OS / editor
 .DS_Store
