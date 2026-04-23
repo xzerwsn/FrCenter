@@ -34,7 +34,16 @@ function createHeaders(token?: string): HeadersInit {
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    let detail = `API request failed: ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } catch {
+      // Keep the generic message when the server returns no JSON body.
+    }
+    throw new Error(detail);
   }
 
   if (response.status === 204) {
