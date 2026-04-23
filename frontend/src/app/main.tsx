@@ -731,6 +731,15 @@ function ChatsPanel({
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
   const canModerateAllMessages = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
+  const scrollToBottom = React.useCallback(() => {
+    const messageListElement = messageListRef.current;
+    if (!messageListElement) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      messageListElement.scrollTop = messageListElement.scrollHeight;
+    });
+  }, []);
 
   React.useEffect(() => {
     void reloadChats();
@@ -803,12 +812,8 @@ function ChatsPanel({
   }, [selectedChat?.type]);
 
   React.useEffect(() => {
-    const messageListElement = messageListRef.current;
-    if (!messageListElement) {
-      return;
-    }
-    messageListElement.scrollTop = messageListElement.scrollHeight;
-  }, [messages]);
+    scrollToBottom();
+  }, [messages.length, selectedChatId, scrollToBottom]);
 
   async function reloadChats() {
     const response = await listChats(token);
@@ -1178,6 +1183,7 @@ function ChatsPanel({
               {message.message_type === "media" ? (
                 <MediaMessageView
                   chatId={selectedChatId}
+                  onMediaReady={scrollToBottom}
                   onPreview={(url, mediaType) => {
                     setPreviewMediaUrl(url);
                     setPreviewMediaType(mediaType);
@@ -1262,11 +1268,13 @@ function ChatsPanel({
 
 function MediaMessageView({
   chatId,
+  onMediaReady,
   token,
   raw,
   onPreview,
 }: {
   chatId: string;
+  onMediaReady: () => void;
   token: string;
   raw: string;
   onPreview: (url: string, mediaType: string) => void;
@@ -1300,6 +1308,7 @@ function MediaMessageView({
         if (active) {
           setMediaUrl(objectUrlToRevoke);
           setMediaError("");
+          onMediaReady();
         }
       } catch (error) {
         if (active) {
@@ -1316,7 +1325,7 @@ function MediaMessageView({
         URL.revokeObjectURL(objectUrlToRevoke);
       }
     };
-  }, [chatId, mediaPayload?.file_mime, mediaPayload?.file_nonce, mediaPayload?.media_url, token]);
+  }, [chatId, mediaPayload?.file_mime, mediaPayload?.file_nonce, mediaPayload?.media_url, onMediaReady, token]);
 
   if (!mediaPayload) {
     return <p>{raw || "..."}</p>;
@@ -1324,6 +1333,7 @@ function MediaMessageView({
 
   const isImage = mediaPayload.file_mime.startsWith("image/");
   const isVideo = mediaPayload.file_mime.startsWith("video/");
+  const isAudio = mediaPayload.file_mime.startsWith("audio/");
 
   return (
     <div className="media-message">
@@ -1331,6 +1341,7 @@ function MediaMessageView({
       {!mediaError && !mediaUrl ? <p>Загружаем медиа...</p> : null}
       {mediaUrl && isImage ? <img alt={mediaPayload.file_name} className="media-inline-preview" src={mediaUrl} /> : null}
       {mediaUrl && isVideo ? <video className="media-inline-preview" controls src={mediaUrl} /> : null}
+      {mediaUrl && isAudio ? <audio className="media-inline-audio" controls src={mediaUrl} /> : null}
       <p>
         Файл: {mediaPayload.file_name} ({formatBytes(mediaPayload.file_size)})
       </p>

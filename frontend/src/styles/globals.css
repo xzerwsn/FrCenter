@@ -713,6 +713,10 @@ button:disabled {
   background: #12070b;
 }
 
+.media-inline-audio {
+  width: min(360px, 100%);
+}
+
 .media-preview-overlay {
   position: fixed;
   inset: 0;
