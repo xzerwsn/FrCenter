@@ -1313,6 +1313,71 @@ button:disabled {
   color: var(--color-button-text);
   background: var(--color-text);
   font-weight: 800;
+  overflow: hidden;
+}
+
+.friend div img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.home-feed-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.home-feed-card {
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--color-surface-strong);
+  box-shadow: 0 16px 30px rgb(0 0 0 / 18%);
+}
+
+.home-feed-image {
+  width: 100%;
+  aspect-ratio: 1 / 1.15;
+  object-fit: cover;
+  display: block;
+  background: var(--color-surface-deep);
+}
+
+.home-feed-meta {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.home-feed-meta p {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.home-feed-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-feed-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-input);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: var(--color-button-text);
+}
+
+.home-feed-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .profile-band {

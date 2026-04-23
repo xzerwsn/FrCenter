@@ -37,6 +37,7 @@ import {
 } from "../api/chats";
 import { registerDevice } from "../api/devices";
 import { addFriendByCode, createInviteCode, listFriends, searchUsers, sendFriendRequest } from "../api/friends";
+import { listFeed, type FeedPublication } from "../api/feed";
 import { uploadEncryptedMedia } from "../api/media";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
@@ -60,6 +61,7 @@ const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
+const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
 
 type SiteTheme = {
   id: string;
@@ -425,11 +427,21 @@ function Dashboard({
 }) {
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
-  const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(null);
+  const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
   }, [session.token]);
+
+  React.useEffect(() => {
+    if (!selectedProfile || "email" in selectedProfile) {
+      return;
+    }
+    const refreshed = friends.find((friend) => friend.id === selectedProfile.id);
+    if (refreshed) {
+      setSelectedProfile(refreshed);
+    }
+  }, [friends, selectedProfile]);
 
   React.useEffect(() => {
     try {
@@ -438,6 +450,18 @@ function Dashboard({
       // ignore storage write errors
     }
   }, [section]);
+
+  React.useEffect(() => {
+    try {
+      if (!selectedProfile || ("email" in selectedProfile && selectedProfile.id === session.user.id)) {
+        localStorage.removeItem(SELECTED_PROFILE_STORAGE_KEY);
+        return;
+      }
+      localStorage.setItem(SELECTED_PROFILE_STORAGE_KEY, JSON.stringify(selectedProfile));
+    } catch {
+      // ignore storage write errors
+    }
+  }, [selectedProfile, session.user.id]);
 
   function openOwnProfile() {
     setSelectedProfile(null);
@@ -514,7 +538,7 @@ function Dashboard({
             onSessionUserUpdate={onSessionUserUpdate}
           />
         ) : null}
-        {section === "home" ? <HomePanel friends={friends} /> : null}
+        {section === "home" ? <HomePanel token={session.token} /> : null}
         <div style={{ display: section === "chats" ? "block" : "none" }}>
           <ChatsPanel token={session.token} me={session.user} friends={friends} />
         </div>
@@ -530,7 +554,9 @@ function Dashboard({
       <aside className="friends">
         {friends.map((friend) => (
           <button className="friend" key={friend.id} onClick={() => openFriendProfile(friend)} type="button">
-            <div>{friend.username.slice(0, 1).toUpperCase()}</div>
+            <div>
+              {friend.avatar_url ? <img alt={friend.username} src={friend.avatar_url} /> : friend.username.slice(0, 1).toUpperCase()}
+            </div>
             <span>{friend.username}</span>
           </button>
         ))}
@@ -987,20 +1013,55 @@ function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): Profil
   }
 }
 
-function HomePanel({ friends }: { friends: UserPublic[] }) {
+function HomePanel({ token }: { token: string }) {
+  const [items, setItems] = React.useState<FeedPublication[]>([]);
+  const [status, setStatus] = React.useState("");
+
+  React.useEffect(() => {
+    let active = true;
+    setStatus("Загружаем публикации...");
+    void listFeed(token)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+        setItems(response);
+        setStatus(response.length === 0 ? "Публикаций пока нет" : "");
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+        setStatus(error instanceof Error ? error.message : "Не удалось загрузить публикации");
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
   return (
     <section className="tool-band single-column">
       <div>
         <h2>Главная</h2>
-        <div className="result-list">
-          {friends.length === 0 ? <p className="form-status">Пока нет друзей</p> : null}
-          {friends.map((friend) => (
-            <div className="result-row" key={friend.id}>
-              <span>{friend.username}</span>
-              <span className={`status-pill status-${normalizeStatus(friend.status)}`}>{humanizeStatus(friend.status)}</span>
-            </div>
-          ))}
-        </div>
+        {status ? <p className="form-status">{status}</p> : null}
+        {items.length > 0 ? (
+          <div className="home-feed-grid">
+            {items.map((item, index) => (
+              <article className="home-feed-card" key={`${item.author_id}-${item.image_url.slice(0, 24)}-${index}`}>
+                <img alt={item.caption || "Публикация"} className="home-feed-image" src={item.image_url} />
+                <div className="home-feed-meta">
+                  <div className="home-feed-author">
+                    <div className="home-feed-avatar">
+                      {item.author_avatar_url ? <img alt={item.author_username} src={item.author_avatar_url} /> : item.author_username.slice(0, 1).toUpperCase()}
+                    </div>
+                    <strong>@{item.author_username}</strong>
+                  </div>
+                  <p>{item.caption || "Без подписи"}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -1509,6 +1570,15 @@ function ChatsPanel({
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
+  React.useEffect(() => {
+    const chatsToPrefetch = orderedChats.slice(0, 4).map((chat) => chat.id);
+    for (const chatId of chatsToPrefetch) {
+      if (!chatMessagesCacheRef.current[chatId]) {
+        void prefetchChatMessages(chatId);
+      }
+    }
+  }, [orderedChats]);
+
   async function reloadChats() {
     const response = await listChats(token);
     setChats(response.chats);
@@ -1572,6 +1642,19 @@ function ChatsPanel({
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
         setMessagesLoading(false);
       }
+    }
+  }
+
+  async function prefetchChatMessages(chatId: string) {
+    if (chatMessagesCacheRef.current[chatId]) {
+      return;
+    }
+    try {
+      const fetchedMessages = await listChatMessages(token, chatId);
+      chatMessagesCacheRef.current[chatId] = fetchedMessages;
+      await decodeMessagesForChat(chatId, fetchedMessages);
+    } catch {
+      // keep prefetch silent
     }
   }
 
@@ -2681,6 +2764,35 @@ function loadStoredDashboardSection(): DashboardSection {
     return isDashboardSection(saved) ? saved : fallback;
   } catch {
     return fallback;
+  }
+}
+
+function loadStoredSelectedProfile(): UserPublic | null {
+  try {
+    const raw = localStorage.getItem(SELECTED_PROFILE_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<UserPublic>;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.id !== "string" || typeof parsed.username !== "string") {
+      return null;
+    }
+    return {
+      id: parsed.id,
+      username: parsed.username,
+      display_name: typeof parsed.display_name === "string" ? parsed.display_name : null,
+      nickname: typeof parsed.nickname === "string" ? parsed.nickname : null,
+      profile_status: typeof parsed.profile_status === "string" ? parsed.profile_status : null,
+      profile_banner_url: typeof parsed.profile_banner_url === "string" ? parsed.profile_banner_url : null,
+      profile_background_url: typeof parsed.profile_background_url === "string" ? parsed.profile_background_url : null,
+      profile_photos: typeof parsed.profile_photos === "string" ? parsed.profile_photos : null,
+      avatar_ring_style: typeof parsed.avatar_ring_style === "string" ? parsed.avatar_ring_style : null,
+      avatar_url: typeof parsed.avatar_url === "string" ? parsed.avatar_url : null,
+      status: typeof parsed.status === "string" ? parsed.status : "offline",
+      current_game: typeof parsed.current_game === "string" ? parsed.current_game : null,
+    };
+  } catch {
+    return null;
   }
 }
 

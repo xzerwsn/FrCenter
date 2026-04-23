@@ -2,6 +2,7 @@ from app.models.chat import Chat, ChatMember, Message, MessageRecipient
 from app.models.device import Device
 from app.models.email_confirmation import EmailConfirmation
 from app.models.friend import FriendRequest, Friendship, InviteCode
+from app.models.media_asset import MediaAsset
 from app.models.user import User
 
 __all__ = [
@@ -12,6 +13,7 @@ __all__ = [
     "FriendRequest",
     "Friendship",
     "InviteCode",
+    "MediaAsset",
     "Message",
     "MessageRecipient",
     "User",
