@@ -604,7 +604,8 @@ function ProfilePanel({
   }, []);
 
   const publicProfilePhotos = React.useMemo(() => parseProfilePhotosFromPublic(profile), [profile]);
-  const profilePhotos = isOwnProfile ? sessionUser.profile_photos : publicProfilePhotos;
+  const ownProfilePhotos = React.useMemo(() => parseProfilePhotosFromPublic(sessionUser), [sessionUser]);
+  const profilePhotos = isOwnProfile ? ownProfilePhotos : publicProfilePhotos;
   const cardAvatar = isOwnProfile ? avatarUrl || sessionUser.avatar_url : profile.avatar_url;
   const cardBanner = isOwnProfile ? bannerUrl || sessionUser.profile_banner_url : profile.profile_banner_url;
   const cardBackground = isOwnProfile ? backgroundUrl || sessionUser.profile_background_url : profile.profile_background_url;
@@ -684,7 +685,7 @@ function ProfilePanel({
           url: publishImageUrl,
           caption: publishCaption.trim() || null,
         },
-        ...sessionUser.profile_photos,
+        ...ownProfilePhotos,
       ].slice(0, 30);
       const updated = await updateMe(token, {
         profile_photos: nextPhotos,
@@ -880,7 +881,21 @@ function ProfilePanel({
 
 function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): ProfilePhoto[] {
   if ("email" in profile) {
-    return profile.profile_photos ?? [];
+    const rawOwnPhotos = profile.profile_photos;
+    if (!Array.isArray(rawOwnPhotos)) {
+      return [];
+    }
+    return rawOwnPhotos
+      .map((item) => {
+        if (typeof item === "string") {
+          return { url: item, caption: null } as ProfilePhoto;
+        }
+        if (item && typeof item === "object" && typeof item.url === "string") {
+          return { url: item.url, caption: typeof item.caption === "string" ? item.caption : null } as ProfilePhoto;
+        }
+        return null;
+      })
+      .filter((item): item is ProfilePhoto => item !== null);
   }
   const raw = profile.profile_photos;
   if (!raw) {
