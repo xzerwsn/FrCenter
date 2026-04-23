@@ -50,7 +50,8 @@ async def list_chats(db: AsyncSession, current_user: User) -> list[Chat]:
         .options(selectinload(Chat.members).selectinload(ChatMember.user))
         .order_by(Chat.updated_at.desc())
     )
-    return list(result.scalars().unique().all())
+    chats = list(result.scalars().unique().all())
+    return [_strip_inactive_members(chat) for chat in chats]
 
 
 async def create_direct_chat(db: AsyncSession, current_user: User, username: str) -> Chat:
@@ -119,7 +120,7 @@ async def get_chat(db: AsyncSession, current_user: User, chat_id: str) -> Chat:
     chat = result.scalar_one_or_none()
     if chat is None:
         raise ChatNotFound
-    return chat
+    return _strip_inactive_members(chat)
 
 
 async def list_messages(db: AsyncSession, current_user: User, chat_id: str) -> list[Message]:
@@ -367,7 +368,7 @@ async def remove_group_member(
         chat = await _get_chat_with_members(db, chat_id)
         if chat is None:
             raise ChatNotFound
-        return chat
+        return _strip_inactive_members(chat)
     return await get_chat(db, current_user, chat_id)
 
 
@@ -464,3 +465,8 @@ def _can_manage_message(actor_role: str, message_sender_id: str, actor_user_id: 
 
 def _ordered_pair(user_a_id: str, user_b_id: str) -> tuple[str, str]:
     return (user_a_id, user_b_id) if user_a_id < user_b_id else (user_b_id, user_a_id)
+
+
+def _strip_inactive_members(chat: Chat) -> Chat:
+    chat.members = [member for member in chat.members if member.left_at is None]
+    return chat

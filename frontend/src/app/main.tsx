@@ -39,7 +39,7 @@ import { registerDevice } from "../api/devices";
 import { addFriendByCode, createInviteCode, listFriends, searchUsers, sendFriendRequest } from "../api/friends";
 import { uploadEncryptedMedia } from "../api/media";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
-import { getMe, type CurrentUser, type UserPublic } from "../api/users";
+import { getMe, updateMe, type CurrentUser, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import {
   createSharedMessageKey,
@@ -215,6 +215,11 @@ function App() {
     <Dashboard
       session={session}
       onLogout={handleLogout}
+      onSessionUserUpdate={(user) => {
+        const nextSession = { ...session, user };
+        setSession(nextSession);
+        saveSession(nextSession);
+      }}
       themeId={activeTheme.id}
       onThemeChange={setThemeId}
     />
@@ -408,11 +413,13 @@ function ConfirmForm({
 function Dashboard({
   session,
   onLogout,
+  onSessionUserUpdate,
   themeId,
   onThemeChange,
 }: {
   session: Session;
   onLogout: () => void;
+  onSessionUserUpdate: (user: CurrentUser) => void;
   themeId: string;
   onThemeChange: (themeId: string) => void;
 }) {
@@ -433,7 +440,7 @@ function Dashboard({
   }, [section]);
 
   function openOwnProfile() {
-    setSelectedProfile(session.user);
+    setSelectedProfile(null);
     setSection("profile");
   }
 
@@ -499,7 +506,14 @@ function Dashboard({
           </div>
         </header>
 
-        {section === "profile" ? <ProfilePanel profile={selectedProfile ?? session.user} /> : null}
+        {section === "profile" ? (
+          <ProfilePanel
+            token={session.token}
+            profile={selectedProfile && selectedProfile.id !== session.user.id ? selectedProfile : session.user}
+            sessionUser={session.user}
+            onSessionUserUpdate={onSessionUserUpdate}
+          />
+        ) : null}
         {section === "home" ? <HomePanel friends={friends} /> : null}
         {section === "chats" ? <ChatsPanel token={session.token} me={session.user} friends={friends} /> : null}
         {section === "friends" ? (
@@ -523,13 +537,134 @@ function Dashboard({
   );
 }
 
-function ProfilePanel({ profile }: { profile: UserPublic | CurrentUser }) {
+function ProfilePanel({
+  token,
+  profile,
+  sessionUser,
+  onSessionUserUpdate,
+}: {
+  token: string;
+  profile: UserPublic | CurrentUser;
+  sessionUser: CurrentUser;
+  onSessionUserUpdate: (user: CurrentUser) => void;
+}) {
   const game = profile.current_game ?? "Не играет";
   const status = profile.status || "offline";
+  const isOwnProfile = "email" in profile && profile.id === sessionUser.id;
+  const [displayName, setDisplayName] = React.useState(sessionUser.display_name ?? "");
+  const [username, setUsername] = React.useState(sessionUser.username);
+  const [nickname, setNickname] = React.useState(sessionUser.nickname ?? "");
+  const [profileStatusText, setProfileStatusText] = React.useState(sessionUser.profile_status ?? "");
+  const [avatarUrl, setAvatarUrl] = React.useState(sessionUser.avatar_url ?? "");
+  const [bannerUrl, setBannerUrl] = React.useState(sessionUser.profile_banner_url ?? "");
+  const [backgroundUrl, setBackgroundUrl] = React.useState(sessionUser.profile_background_url ?? "");
+  const [ringStyle, setRingStyle] = React.useState(sessionUser.avatar_ring_style ?? "holo");
+  const [profilePhotos, setProfilePhotos] = React.useState<string[]>(sessionUser.profile_photos ?? []);
+  const [statusText, setStatusText] = React.useState("");
+  const avatarInputRef = React.useRef<HTMLInputElement | null>(null);
+  const bannerInputRef = React.useRef<HTMLInputElement | null>(null);
+  const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (!isOwnProfile) {
+      return;
+    }
+    setDisplayName(sessionUser.display_name ?? "");
+    setUsername(sessionUser.username);
+    setNickname(sessionUser.nickname ?? "");
+    setProfileStatusText(sessionUser.profile_status ?? "");
+    setAvatarUrl(sessionUser.avatar_url ?? "");
+    setBannerUrl(sessionUser.profile_banner_url ?? "");
+    setBackgroundUrl(sessionUser.profile_background_url ?? "");
+    setRingStyle(sessionUser.avatar_ring_style ?? "holo");
+    setProfilePhotos(sessionUser.profile_photos ?? []);
+  }, [
+    isOwnProfile,
+    sessionUser.avatar_ring_style,
+    sessionUser.avatar_url,
+    sessionUser.display_name,
+    sessionUser.nickname,
+    sessionUser.profile_background_url,
+    sessionUser.profile_banner_url,
+    sessionUser.profile_photos,
+    sessionUser.profile_status,
+    sessionUser.username,
+  ]);
+
+  async function handleSingleImagePick(
+    file: File | null,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    errorText: string,
+  ) {
+    if (!file) {
+      setter("");
+      return;
+    }
+    try {
+      setter(await fileToDataUrl(file));
+    } catch {
+      setStatusText(errorText);
+    }
+  }
+
+  async function handleProfileGalleryPick(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+    try {
+      const next = await Promise.all(Array.from(fileList).map((file) => fileToDataUrl(file)));
+      setProfilePhotos((current) => [...current, ...next].slice(0, 30));
+    } catch {
+      setStatusText("Не удалось загрузить фотографии профиля");
+    }
+  }
+
+  async function handleSaveProfile(event: React.FormEvent) {
+    event.preventDefault();
+    if (!isOwnProfile) {
+      return;
+    }
+    setStatusText("Сохраняем профиль...");
+    try {
+      const updated = await updateMe(token, {
+        display_name: displayName.trim() || null,
+        username: username.trim() || sessionUser.username,
+        nickname: nickname.trim() || null,
+        profile_status: profileStatusText.trim() || null,
+        avatar_url: avatarUrl || null,
+        profile_banner_url: bannerUrl || null,
+        profile_background_url: backgroundUrl || null,
+        avatar_ring_style: ringStyle || null,
+        profile_photos: profilePhotos,
+      });
+      onSessionUserUpdate(updated);
+      setStatusText("Профиль обновлен");
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "Не удалось обновить профиль");
+    }
+  }
+
   return (
-    <section className="tool-band">
-      <div>
+    <section className="tool-band profile-band">
+      <div className="profile-panel">
         <h2>Профиль</h2>
+        <div
+          className="profile-header-card"
+          style={backgroundUrl ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 74%), rgb(19 17 29 / 82%)), url("${backgroundUrl}")` } : undefined}
+        >
+          {bannerUrl ? <img alt="Баннер профиля" className="profile-banner-image" src={bannerUrl} /> : null}
+          <div className={`profile-avatar-ring ring-${ringStyle || "holo"}`}>
+            <div className="profile-avatar-core">
+              {avatarUrl ? <img alt={profile.username} src={avatarUrl} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
+            </div>
+          </div>
+          <div className="profile-main-meta">
+            <strong>{displayName || profile.display_name || profile.username}</strong>
+            <span>@{username || profile.username}</span>
+            <span>{profileStatusText || profile.profile_status || humanizeStatus(status)}</span>
+          </div>
+        </div>
         <div className="result-row">
           <span>
             <b>{profile.username}</b> · {status}
@@ -537,11 +672,110 @@ function ProfilePanel({ profile }: { profile: UserPublic | CurrentUser }) {
           <UserRound size={18} />
         </div>
         <p className="form-status">Текущая игра: {game}</p>
-      </div>
-      <div>
-        <h2>Общее</h2>
         {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
         <p className="form-status">ID: {profile.id}</p>
+      </div>
+      <div className="profile-settings-panel">
+        {isOwnProfile ? (
+          <form className="auth-form profile-edit-form" onSubmit={handleSaveProfile}>
+            <label>
+              Имя
+              <input maxLength={120} onChange={(event) => setDisplayName(event.target.value)} value={displayName} />
+            </label>
+            <label>
+              Никнейм
+              <input maxLength={32} minLength={3} onChange={(event) => setUsername(event.target.value)} value={username} />
+            </label>
+            <label>
+              @Тег
+              <input maxLength={32} onChange={(event) => setNickname(event.target.value)} value={nickname} />
+            </label>
+            <label>
+              Статус
+              <input maxLength={160} onChange={(event) => setProfileStatusText(event.target.value)} value={profileStatusText} />
+            </label>
+            <label>
+              Стиль обводки аватара
+              <select onChange={(event) => setRingStyle(event.target.value)} value={ringStyle}>
+                <option value="holo">Holo</option>
+                <option value="neon">Neon</option>
+                <option value="soft">Soft</option>
+              </select>
+            </label>
+            <div className="create-chat-media">
+              <button onClick={() => avatarInputRef.current?.click()} type="button">
+                Аватар
+              </button>
+              <button onClick={() => bannerInputRef.current?.click()} type="button">
+                Баннер
+              </button>
+              <button onClick={() => backgroundInputRef.current?.click()} type="button">
+                Фон профиля
+              </button>
+              <button onClick={() => galleryInputRef.current?.click()} type="button">
+                Фото профиля
+              </button>
+            </div>
+            <input
+              accept="image/*"
+              className="visually-hidden"
+              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setAvatarUrl, "Не удалось загрузить аватар")}
+              ref={avatarInputRef}
+              type="file"
+            />
+            <input
+              accept="image/*"
+              className="visually-hidden"
+              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBannerUrl, "Не удалось загрузить баннер")}
+              ref={bannerInputRef}
+              type="file"
+            />
+            <input
+              accept="image/*"
+              className="visually-hidden"
+              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBackgroundUrl, "Не удалось загрузить фон")}
+              ref={backgroundInputRef}
+              type="file"
+            />
+            <input
+              accept="image/*"
+              className="visually-hidden"
+              multiple
+              onChange={(event) => void handleProfileGalleryPick(event.target.files)}
+              ref={galleryInputRef}
+              type="file"
+            />
+            {profilePhotos.length > 0 ? (
+              <div className="profile-photo-grid">
+                {profilePhotos.map((photo, index) => (
+                  <div className="profile-photo-card" key={`${photo.slice(0, 24)}-${index}`}>
+                    <img alt={`Фото ${index + 1}`} src={photo} />
+                    <button onClick={() => setProfilePhotos((current) => current.filter((_, item) => item !== index))} type="button">
+                      Удалить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <button type="submit">Сохранить профиль</button>
+            {statusText ? <p className="form-status">{statusText}</p> : null}
+          </form>
+        ) : (
+          <div className="result-list">
+            <div className="result-row">
+              <span>Имя</span>
+              <span>{profile.display_name || profile.username}</span>
+            </div>
+            <div className="result-row">
+              <span>Ник</span>
+              <span>{profile.nickname ? `@${profile.nickname}` : "не указан"}</span>
+            </div>
+            <div className="result-row">
+              <span>Статус профиля</span>
+              <span>{profile.profile_status || humanizeStatus(profile.status)}</span>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -903,8 +1137,9 @@ function ChatsPanel({
   const chatPaneStyle: React.CSSProperties | undefined = selectedChat?.background_url
     ? {
         backgroundImage: `linear-gradient(rgb(75 18 32 / 80%), rgb(75 18 32 / 90%)), url("${selectedChat.background_url}")`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
+        backgroundSize: "100% 100%, cover",
+        backgroundPosition: "center, center",
+        backgroundRepeat: "no-repeat, no-repeat",
       }
     : undefined;
 
@@ -1412,6 +1647,8 @@ function ChatsPanel({
       try {
         await removeGroupMember(token, chat.id, me.id);
         setPinnedChatIds((current) => current.filter((item) => item !== chat.id));
+        setChatInfoModalOpen(false);
+        setChatSettingsModalOpen(false);
         await reloadChats();
         setStatus("");
       } catch (error) {
@@ -1619,10 +1856,15 @@ function ChatsPanel({
       >
         {selectedChatMeta ? (
           <div className="chat-pane-header">
-            <button className="chat-meta-pill" onClick={() => setChatInfoModalOpen(true)} type="button">
-              <strong>{selectedChatMeta.title}</strong>
-              <span>{selectedChatMeta.subtitle}</span>
-            </button>
+            <div className="chat-head-left">
+              <div className="chat-pane-avatar">
+                {selectedChatMeta.avatarUrl ? <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} /> : selectedChatMeta.initials}
+              </div>
+              <button className="chat-meta-pill" onClick={() => setChatInfoModalOpen(true)} type="button">
+                <strong>{selectedChatMeta.title}</strong>
+                <span>{selectedChatMeta.subtitle}</span>
+              </button>
+            </div>
             {selectedChat?.type === "group" ? (
               <button
                 aria-label="Настройки чата"
@@ -1869,7 +2111,6 @@ function ChatsPanel({
             <Paperclip size={16} />
           </button>
           <input
-            onPaste={handlePasteAttachments}
             onChange={(event) => setMessageText(event.target.value)}
             placeholder="Сообщение"
             value={messageText}
@@ -1987,8 +2228,10 @@ function MediaMessageView({
     return <p>{raw || "..."}</p>;
   }
 
+  const isGallery = resolvedFiles.length > 1;
+
   return (
-    <div className="media-message">
+    <div className={`media-message ${isGallery ? "gallery" : ""}`}>
       {mediaError ? <p>{mediaError}</p> : null}
       {!mediaError && resolvedFiles.length === 0 ? <p>Загружаем медиа...</p> : null}
       {resolvedFiles.map(({ payload, url }) => {
