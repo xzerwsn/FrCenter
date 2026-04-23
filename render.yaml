@@ -47,11 +47,12 @@ services:
       - key: BACKEND_URL
         value: https://frcenter-backend.onrender.com
 
-  - type: static
+  - type: web
     name: frcenter-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
-    publishPath: dist
+    staticPublishPath: dist
     autoDeploy: true
     envVars:
       - key: VITE_BACKEND_URL
