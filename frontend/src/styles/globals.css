@@ -279,6 +279,75 @@ button:disabled {
   margin-top: 14px;
 }
 
+.tool-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.8fr);
+  gap: 18px;
+  margin-top: 24px;
+  padding: 20px;
+  border-radius: 24px;
+  background: #4b1220;
+}
+
+.tool-band h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+}
+
+.inline-form {
+  display: flex;
+  gap: 10px;
+}
+
+.inline-form.stacked {
+  margin-top: 14px;
+  flex-direction: column;
+}
+
+.inline-form input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: #fff;
+  background: #551625;
+}
+
+.inline-form button,
+.result-row button {
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 14px;
+  color: #3d0d18;
+  background: #fff4b5;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.result-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #3d0d18;
+}
+
+.invite-code {
+  display: block;
+  margin-top: 12px;
+  color: #ffe5c4;
+  overflow-wrap: anywhere;
+}
+
 .friend {
   display: grid;
   justify-items: center;
@@ -325,6 +394,14 @@ button:disabled {
 
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .tool-band {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-form {
+    flex-direction: column;
   }
 }
 

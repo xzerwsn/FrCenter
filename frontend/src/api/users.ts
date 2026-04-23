@@ -12,6 +12,14 @@ export type CurrentUser = {
   updated_at: string;
 };
 
+export type UserPublic = {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  status: string;
+  current_game: string | null;
+};
+
 export async function getMe(token: string): Promise<CurrentUser> {
   return apiGet<CurrentUser>("/api/users/me", { token });
 }

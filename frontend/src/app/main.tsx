@@ -4,14 +4,20 @@ import { Gamepad2, Home, LogOut, MessageCircle, Newspaper, Settings, Users } fro
 
 import { confirmEmail, login, register } from "../api/auth";
 import { registerDevice } from "../api/devices";
+import {
+  addFriendByCode,
+  createInviteCode,
+  listFriends,
+  searchUsers,
+  sendFriendRequest,
+} from "../api/friends";
 import { getMe, type CurrentUser } from "../api/users";
+import type { UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
 
 type AuthMode = "login" | "register" | "confirm";
-
-const friends = ["Nikitin", "Vega", "Mira", "Zero", "RiotKid"];
 
 function App() {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
@@ -270,6 +276,11 @@ function Dashboard({
   onCreateDeviceKeys: (cloudPassword: string) => Promise<void>;
 }) {
   const [cloudPassword, setCloudPassword] = React.useState("");
+  const [friends, setFriends] = React.useState<UserPublic[]>([]);
+
+  React.useEffect(() => {
+    void listFriends(session.token).then((response) => setFriends(response.friends));
+  }, [session.token]);
 
   return (
     <main className="shell">
@@ -334,17 +345,128 @@ function Dashboard({
             </button>
           </article>
         </section>
+        <FriendsPanel token={session.token} onFriendsChanged={setFriends} />
       </section>
 
       <aside className="friends">
         {friends.map((friend) => (
-          <div className="friend" key={friend}>
-            <div>{friend.slice(0, 1)}</div>
-            <span>{friend}</span>
+          <div className="friend" key={friend.id}>
+            <div>{friend.username.slice(0, 1).toUpperCase()}</div>
+            <span>{friend.username}</span>
           </div>
         ))}
       </aside>
     </main>
+  );
+}
+
+function FriendsPanel({
+  token,
+  onFriendsChanged,
+}: {
+  token: string;
+  onFriendsChanged: (friends: UserPublic[]) => void;
+}) {
+  const [query, setQuery] = React.useState("");
+  const [searchResults, setSearchResults] = React.useState<UserPublic[]>([]);
+  const [inviteCode, setInviteCode] = React.useState("");
+  const [joinCode, setJoinCode] = React.useState("");
+  const [status, setStatus] = React.useState("");
+
+  async function refreshFriends() {
+    const response = await listFriends(token);
+    onFriendsChanged(response.friends);
+  }
+
+  async function handleSearch(event: React.FormEvent) {
+    event.preventDefault();
+    setStatus("Ищем...");
+    try {
+      const results = await searchUsers(token, query);
+      setSearchResults(results);
+      setStatus(results.length ? "" : "Никого не нашли");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось найти пользователя");
+    }
+  }
+
+  async function handleRequest(username: string) {
+    setStatus("Отправляем заявку...");
+    try {
+      await sendFriendRequest(token, username);
+      setStatus("Заявка отправлена");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить заявку");
+    }
+  }
+
+  async function handleCreateInvite() {
+    setStatus("Создаем invite-код...");
+    try {
+      const response = await createInviteCode(token);
+      setInviteCode(response.code);
+      setStatus("Invite-код готов");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось создать invite-код");
+    }
+  }
+
+  async function handleAddByCode(event: React.FormEvent) {
+    event.preventDefault();
+    setStatus("Добавляем друга...");
+    try {
+      await addFriendByCode(token, joinCode);
+      setJoinCode("");
+      await refreshFriends();
+      setStatus("Друг добавлен");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось добавить по коду");
+    }
+  }
+
+  return (
+    <section className="tool-band">
+      <div>
+        <h2>Друзья</h2>
+        <form className="inline-form" onSubmit={handleSearch}>
+          <input
+            placeholder="Username"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            required
+          />
+          <button type="submit">Найти</button>
+        </form>
+        <div className="result-list">
+          {searchResults.map((user) => (
+            <div className="result-row" key={user.id}>
+              <span>{user.username}</span>
+              <button onClick={() => handleRequest(user.username)} type="button">
+                Заявка
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2>Invite</h2>
+        <button className="inline-action" onClick={handleCreateInvite} type="button">
+          Создать код
+        </button>
+        {inviteCode ? <small className="invite-code">{inviteCode}</small> : null}
+        <form className="inline-form stacked" onSubmit={handleAddByCode}>
+          <input
+            placeholder="Код друга"
+            value={joinCode}
+            onChange={(event) => setJoinCode(event.target.value)}
+            required
+          />
+          <button type="submit">Добавить</button>
+        </form>
+      </div>
+      {status ? <p className="form-status">{status}</p> : null}
+    </section>
   );
 }
 
