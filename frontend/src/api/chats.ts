@@ -40,12 +40,30 @@ export type SendMessagePayload = {
   encrypted_message_keys?: Record<string, string>;
 };
 
+export type CreateGroupChatPayload = {
+  title: string;
+  usernames: string[];
+  encrypted_group_key?: string;
+};
+
 export async function listChats(token: string): Promise<ChatListResponse> {
   return apiGet<ChatListResponse>("/api/chats", { token });
 }
 
 export async function createDirectChat(token: string, username: string): Promise<Chat> {
   return apiPost<Chat>("/api/chats/direct", { username }, { token });
+}
+
+export async function createGroupChat(token: string, payload: CreateGroupChatPayload): Promise<Chat> {
+  return apiPost<Chat>(
+    "/api/chats/group",
+    {
+      title: payload.title,
+      usernames: payload.usernames,
+      encrypted_group_key: payload.encrypted_group_key ?? null,
+    },
+    { token },
+  );
 }
 
 export async function listChatMessages(token: string, chatId: string): Promise<Message[]> {

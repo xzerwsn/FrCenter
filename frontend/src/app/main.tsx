@@ -3,7 +3,15 @@ import ReactDOM from "react-dom/client";
 import { Gamepad2, Home, LogOut, MessageCircle, Newspaper, Settings, Users } from "lucide-react";
 
 import { confirmEmail, login, register } from "../api/auth";
-import { type Chat, type Message, createDirectChat, listChatMessages, listChats, sendChatMessage } from "../api/chats";
+import {
+  type Chat,
+  type Message,
+  createDirectChat,
+  createGroupChat,
+  listChatMessages,
+  listChats,
+  sendChatMessage,
+} from "../api/chats";
 import { registerDevice } from "../api/devices";
 import {
   addFriendByCode,
@@ -196,20 +204,37 @@ function RegisterForm({
       </label>
       <label>
         Username
-        <input value={username} onChange={(event) => setUsername(event.target.value)} required />
+        <input
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          minLength={3}
+          maxLength={32}
+          pattern="[A-Za-z0-9_]+"
+          title="Только латинские буквы, цифры и _ (3-32 символа)"
+          required
+        />
       </label>
       <label>
         Пароль
-        <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            type="password"
+            minLength={8}
+            maxLength={256}
+            required
+          />
       </label>
       <label>
         Облачный пароль
-        <input
-          value={cloudPassword}
-          onChange={(event) => setCloudPassword(event.target.value)}
-          type="password"
-          required
-        />
+          <input
+            value={cloudPassword}
+            onChange={(event) => setCloudPassword(event.target.value)}
+            type="password"
+            minLength={8}
+            maxLength={256}
+            required
+          />
       </label>
       <button type="submit">Зарегистрироваться</button>
       <button className="link-button" onClick={onSwitch} type="button">
@@ -491,6 +516,8 @@ function ChatsPanel({
   const [messageText, setMessageText] = React.useState("");
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
   const [directUsername, setDirectUsername] = React.useState("");
+  const [groupTitle, setGroupTitle] = React.useState("");
+  const [groupUsernames, setGroupUsernames] = React.useState("");
   const [status, setStatus] = React.useState("");
 
   React.useEffect(() => {
@@ -568,6 +595,36 @@ function ChatsPanel({
     }
   }
 
+  async function handleCreateGroup(event: React.FormEvent) {
+    event.preventDefault();
+    setStatus("Создаем групповой чат...");
+    try {
+      const usernames = groupUsernames
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+
+      if (usernames.length === 0) {
+        setStatus("Укажи хотя бы одного участника через запятую");
+        return;
+      }
+
+      const uniqueUsernames = Array.from(new Set(usernames));
+      const chat = await createGroupChat(token, {
+        title: groupTitle.trim(),
+        usernames: uniqueUsernames,
+      });
+      setGroupTitle("");
+      setGroupUsernames("");
+      await ensureChatKey(chat.id);
+      await reloadChats();
+      setSelectedChatId(chat.id);
+      setStatus("Групповой чат готов");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось создать групповой чат");
+    }
+  }
+
   async function handleSendMessage(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedChatId) {
@@ -609,6 +666,23 @@ function ChatsPanel({
             ))}
           </datalist>
           <button type="submit">Direct</button>
+        </form>
+        <form className="inline-form stacked" onSubmit={handleCreateGroup}>
+          <input
+            placeholder="Название группы"
+            value={groupTitle}
+            onChange={(event) => setGroupTitle(event.target.value)}
+            minLength={1}
+            maxLength={120}
+            required
+          />
+          <input
+            placeholder="Участники: user1, user2"
+            value={groupUsernames}
+            onChange={(event) => setGroupUsernames(event.target.value)}
+            required
+          />
+          <button type="submit">Создать группу</button>
         </form>
         <div className="chat-list">
           {chats.map((chat) => (

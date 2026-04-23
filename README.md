@@ -37,6 +37,15 @@ scripts/   Local helper scripts
 
 See [docs/LOCAL_BACKEND.md](docs/LOCAL_BACKEND.md) for the first auth API run with PostgreSQL and Alembic migrations.
 
+## One-command local start (Windows)
+
+```powershell
+cd C:\tgg
+.\scripts\start_all.ps1
+```
+
+This opens two PowerShell windows: backend on `http://localhost:8000` and frontend on `http://localhost:5173`.
+
 ## Security Note
 
 Never commit real secrets. Copy `.env.example` to `.env` on the target server and fill in private values there.
