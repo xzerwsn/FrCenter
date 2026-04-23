@@ -400,6 +400,16 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.invite-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.invite-code-row .inline-action {
+  margin-top: 0;
+}
+
 .chat-band {
   display: grid;
   grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
@@ -407,8 +417,14 @@ button:disabled {
   margin-top: 26px;
 }
 
+.chat-band.direct-full-height {
+  height: calc(100vh - 190px);
+}
+
 .chat-list-pane,
 .chat-pane {
+  display: flex;
+  flex-direction: column;
   padding: 24px;
   border-radius: 26px;
   background: #4b1220;
@@ -424,6 +440,7 @@ button:disabled {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+  overflow: auto;
 }
 
 .chat-row {
@@ -448,12 +465,139 @@ button:disabled {
 }
 
 .message-list {
-  min-height: 200px;
-  max-height: 320px;
+  min-height: 220px;
+  max-height: 420px;
+  flex: 1;
   overflow: auto;
   display: grid;
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.chat-band.direct-full-height .chat-list-pane,
+.chat-band.direct-full-height .chat-pane {
+  height: 100%;
+}
+
+.chat-band.direct-full-height .message-list {
+  min-height: 0;
+  max-height: none;
+}
+
+.friend-select {
+  position: relative;
+  width: 100%;
+}
+
+.friend-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #fff;
+  background: #551625;
+  cursor: pointer;
+}
+
+.friend-select-trigger span {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-select-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  max-height: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 16px;
+  background: #3d0d18;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease, max-height 0.18s ease, padding 0.18s ease;
+  z-index: 10;
+}
+
+.friend-select-dropdown.open {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.friend-select-item {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #ffe5c4;
+  background: #551625;
+  text-align: left;
+  cursor: pointer;
+}
+
+.friend-select-item:hover {
+  background: #6a2133;
+}
+
+.friend-select-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.friend-select-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-settings {
+  margin-bottom: 14px;
+}
+
+.chat-settings-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  color: #fff;
+  background: #551625;
+  cursor: pointer;
+}
+
+.chat-settings-toggle svg {
+  transition: transform 0.18s ease;
+}
+
+.chat-settings-toggle .rotated {
+  transform: rotate(180deg);
+}
+
+.chat-settings-panel {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: max-height 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+}
+
+.chat-settings-panel.open {
+  max-height: 460px;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .message {
@@ -540,6 +684,10 @@ button:disabled {
 
   .chat-band {
     grid-template-columns: 1fr;
+  }
+
+  .chat-band.direct-full-height {
+    height: auto;
   }
 
   .inline-form {

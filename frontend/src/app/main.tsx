@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import {
   Bell,
+  ChevronDown,
   Gamepad2,
   Home,
   LogOut,
@@ -37,6 +38,7 @@ import {
   encryptBytesForSharedKey,
   encryptTextForSharedKey,
 } from "../crypto/messages";
+import { bytesToBase64 } from "../crypto/encoding";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
 
@@ -556,6 +558,7 @@ function FriendsPanel({
 
   React.useEffect(() => {
     void refreshFriends();
+    void loadInviteCode();
   }, [token]);
 
   async function refreshFriends() {
@@ -595,6 +598,27 @@ function FriendsPanel({
       setStatus("Invite-код готов");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось создать invite-код");
+    }
+  }
+
+  async function loadInviteCode() {
+    try {
+      const response = await createInviteCode(token);
+      setInviteCode(response.code);
+    } catch {
+      // Keep the rest of the panel usable even if invite call fails.
+    }
+  }
+
+  async function handleCopyInviteCode() {
+    if (!inviteCode) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      setStatus("Код скопирован");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось скопировать код");
     }
   }
 
@@ -646,7 +670,14 @@ function FriendsPanel({
         <button className="inline-action" onClick={handleCreateInvite} type="button">
           Создать код
         </button>
-        {inviteCode ? <small className="invite-code">{inviteCode}</small> : null}
+        {inviteCode ? (
+          <div className="invite-code-row">
+            <small className="invite-code">{inviteCode}</small>
+            <button className="inline-action" onClick={handleCopyInviteCode} type="button">
+              Скопировать
+            </button>
+          </div>
+        ) : null}
         <form className="inline-form stacked" onSubmit={handleAddByCode}>
           <input placeholder="Код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
           <button type="submit">Добавить</button>
@@ -674,9 +705,14 @@ function ChatsPanel({
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
   const [directUsername, setDirectUsername] = React.useState("");
   const [groupTitle, setGroupTitle] = React.useState("");
-  const [groupUsernames, setGroupUsernames] = React.useState("");
+  const [groupUsernames, setGroupUsernames] = React.useState<string[]>([]);
   const [memberUsername, setMemberUsername] = React.useState("");
+  const [directDropdownOpen, setDirectDropdownOpen] = React.useState(false);
+  const [groupDropdownOpen, setGroupDropdownOpen] = React.useState(false);
+  const [groupSettingsOpen, setGroupSettingsOpen] = React.useState(false);
   const [status, setStatus] = React.useState("");
+  const directDropdownRef = React.useRef<HTMLDivElement | null>(null);
+  const groupDropdownRef = React.useRef<HTMLDivElement | null>(null);
   const selectedChat = chats.find((chat) => chat.id === selectedChatId) ?? null;
   const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
@@ -701,7 +737,7 @@ function ChatsPanel({
       }
       const incoming = event.message as Message;
       if (incoming.chat_id === selectedChatId) {
-        setMessages((previous) => [...previous, incoming]);
+        setMessages((previous) => (previous.some((item) => item.id === incoming.id) ? previous : [...previous, incoming]));
       }
       void reloadChats();
     });
@@ -709,8 +745,29 @@ function ChatsPanel({
   }, [selectedChatId, token]);
 
   React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const targetNode = event.target as Node;
+      if (directDropdownRef.current && !directDropdownRef.current.contains(targetNode)) {
+        setDirectDropdownOpen(false);
+      }
+      if (groupDropdownRef.current && !groupDropdownRef.current.contains(targetNode)) {
+        setGroupDropdownOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  React.useEffect(() => {
     void decodeMessages(messages);
-  }, [messages]);
+  }, [messages, selectedChatId]);
+
+  React.useEffect(() => {
+    if (selectedChat?.type !== "group") {
+      setGroupSettingsOpen(false);
+    }
+  }, [selectedChat?.type]);
 
   async function reloadChats() {
     const response = await listChats(token);
@@ -736,12 +793,26 @@ function ChatsPanel({
     setDecodeMap(decoded);
   }
 
+  function toggleGroupUsername(username: string) {
+    setGroupUsernames((current) => {
+      if (current.includes(username)) {
+        return current.filter((item) => item !== username);
+      }
+      return [...current, username];
+    });
+  }
+
   async function handleCreateDirect(event: React.FormEvent) {
     event.preventDefault();
+    if (!directUsername.trim()) {
+      setStatus("Выбери друга");
+      return;
+    }
     setStatus("Создаем direct-чат...");
     try {
-      const chat = await createDirectChat(token, directUsername);
+      const chat = await createDirectChat(token, directUsername.trim());
       setDirectUsername("");
+      setDirectDropdownOpen(false);
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
@@ -755,17 +826,15 @@ function ChatsPanel({
     event.preventDefault();
     setStatus("Создаем групповой чат...");
     try {
-      const usernames = groupUsernames
-        .split(",")
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0);
+      const usernames = Array.from(new Set(groupUsernames.map((item) => item.trim()).filter((item) => item.length > 0)));
       if (usernames.length === 0) {
-        setStatus("Укажи хотя бы одного участника через запятую");
+        setStatus("Выбери хотя бы одного друга");
         return;
       }
-      const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames: Array.from(new Set(usernames)) });
+      const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames });
       setGroupTitle("");
-      setGroupUsernames("");
+      setGroupUsernames([]);
+      setGroupDropdownOpen(false);
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
@@ -832,13 +901,12 @@ function ChatsPanel({
     try {
       const key = await ensureChatKey(selectedChatId);
       const encrypted = await encryptTextForSharedKey(messageText, key);
-      const message = await sendChatMessage(token, selectedChatId, {
+      await sendChatMessage(token, selectedChatId, {
         ciphertext: encrypted.ciphertext,
         nonce: encrypted.nonce,
         message_type: "text",
       });
       setMessageText("");
-      setMessages((previous) => [...previous, message]);
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
@@ -872,12 +940,11 @@ function ChatsPanel({
         }),
         chatKey,
       );
-      const message = await sendChatMessage(token, selectedChatId, {
+      await sendChatMessage(token, selectedChatId, {
         ciphertext: encryptedPayload.ciphertext,
         nonce: encryptedPayload.nonce,
         message_type: "media",
       });
-      setMessages((previous) => [...previous, message]);
       setAttachmentFile(null);
       setStatus("Вложение отправлено");
     } catch (error) {
@@ -908,21 +975,49 @@ function ChatsPanel({
   }
 
   return (
-    <section className="chat-band">
+    <section className={`chat-band ${selectedChat?.type === "direct" ? "direct-full-height" : ""}`}>
       <div className="chat-list-pane">
         <h2>Чаты</h2>
         <form className="inline-form" onSubmit={handleCreateDirect}>
-          <input list="friend-options" placeholder="Username друга" value={directUsername} onChange={(event) => setDirectUsername(event.target.value)} required />
-          <datalist id="friend-options">
-            {friends.map((friend) => (
-              <option key={friend.id} value={friend.username} />
-            ))}
-          </datalist>
+          <div className="friend-select" ref={directDropdownRef}>
+            <button className="friend-select-trigger" onClick={() => setDirectDropdownOpen((open) => !open)} type="button">
+              <span>{directUsername || "Username друга"}</span>
+              <ChevronDown size={16} />
+            </button>
+            <div className={`friend-select-dropdown ${directDropdownOpen ? "open" : ""}`}>
+              {friends.map((friend) => (
+                <button
+                  className="friend-select-item"
+                  key={friend.id}
+                  onClick={() => {
+                    setDirectUsername(friend.username);
+                    setDirectDropdownOpen(false);
+                  }}
+                  type="button"
+                >
+                  {friend.username}
+                </button>
+              ))}
+            </div>
+          </div>
           <button type="submit">Direct</button>
         </form>
         <form className="inline-form stacked" onSubmit={handleCreateGroup}>
           <input placeholder="Название группы" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
-          <input placeholder="Участники: user1, user2" value={groupUsernames} onChange={(event) => setGroupUsernames(event.target.value)} required />
+          <div className="friend-select" ref={groupDropdownRef}>
+            <button className="friend-select-trigger" onClick={() => setGroupDropdownOpen((open) => !open)} type="button">
+              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username друга"}</span>
+              <ChevronDown size={16} />
+            </button>
+            <div className={`friend-select-dropdown ${groupDropdownOpen ? "open" : ""}`}>
+              {friends.map((friend) => (
+                <label className="friend-select-item friend-select-check" key={friend.id}>
+                  <input checked={groupUsernames.includes(friend.username)} onChange={() => toggleGroupUsername(friend.username)} type="checkbox" />
+                  <span>{friend.username}</span>
+                </label>
+              ))}
+            </div>
+          </div>
           <button type="submit">Создать группу</button>
         </form>
         <div className="chat-list">
@@ -938,38 +1033,46 @@ function ChatsPanel({
       <div className="chat-pane">
         <h2>Сообщения</h2>
         {selectedChat?.type === "group" ? (
-          <div className="result-list">
-            <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
-            {canManageMembers ? (
-              <form className="inline-form" onSubmit={handleAddMember}>
-                <input
-                  placeholder="Username участника"
-                  value={memberUsername}
-                  onChange={(event) => setMemberUsername(event.target.value)}
-                  minLength={3}
-                  maxLength={32}
-                  required
-                />
-                <button type="submit">Добавить</button>
-              </form>
-            ) : null}
-            {selectedChat.members.map((member) => (
-              <div className="result-row" key={member.user.id}>
-                <span>
-                  {member.user.username} ({member.role})
-                </span>
-                {canManageRoles && member.role !== "owner" ? (
-                  <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
-                    {member.role === "admin" ? "Снять admin" : "Сделать admin"}
-                  </button>
+          <div className="chat-settings">
+            <button className="chat-settings-toggle" onClick={() => setGroupSettingsOpen((open) => !open)} type="button">
+              Настройки чата
+              <ChevronDown className={groupSettingsOpen ? "rotated" : ""} size={16} />
+            </button>
+            <div className={`chat-settings-panel ${groupSettingsOpen ? "open" : ""}`}>
+              <div className="result-list">
+                <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
+                {canManageMembers ? (
+                  <form className="inline-form" onSubmit={handleAddMember}>
+                    <input
+                      placeholder="Username участника"
+                      value={memberUsername}
+                      onChange={(event) => setMemberUsername(event.target.value)}
+                      minLength={3}
+                      maxLength={32}
+                      required
+                    />
+                    <button type="submit">Добавить</button>
+                  </form>
                 ) : null}
-                {canManageMembers && member.role !== "owner" ? (
-                  <button onClick={() => handleRemoveMember(member.user.id)} type="button">
-                    Удалить
-                  </button>
-                ) : null}
+                {selectedChat.members.map((member) => (
+                  <div className="result-row" key={member.user.id}>
+                    <span>
+                      {member.user.username} ({member.role})
+                    </span>
+                    {canManageRoles && member.role !== "owner" ? (
+                      <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
+                        {member.role === "admin" ? "Снять admin" : "Сделать admin"}
+                      </button>
+                    ) : null}
+                    {canManageMembers && member.role !== "owner" ? (
+                      <button onClick={() => handleRemoveMember(member.user.id)} type="button">
+                        Удалить
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         ) : null}
 
@@ -1095,13 +1198,16 @@ function formatBytes(value: number): string {
 
 async function ensureChatKey(chatId: string): Promise<string> {
   const storageKey = `${CHAT_KEY_PREFIX}${chatId}`;
-  const existing = localStorage.getItem(storageKey);
-  if (existing) {
-    return existing;
+  const derived = await deriveDeterministicChatKey(chatId);
+  if (localStorage.getItem(storageKey) !== derived) {
+    localStorage.setItem(storageKey, derived);
   }
-  const nextKey = await createSharedMessageKey();
-  localStorage.setItem(storageKey, nextKey);
-  return nextKey;
+  return derived;
+}
+
+async function deriveDeterministicChatKey(chatId: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`frcenter:${chatId}`));
+  return bytesToBase64(new Uint8Array(digest));
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

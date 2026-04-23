@@ -7,6 +7,8 @@ from sqlalchemy.orm import selectinload
 from app.models.friend import FriendRequest, Friendship, InviteCode
 from app.models.user import User
 
+PERSONAL_INVITE_MAX_USES = 1_000_000
+
 
 class FriendError(Exception):
     pass
@@ -99,7 +101,22 @@ async def accept_friend_request(db: AsyncSession, current_user: User, request_id
 
 
 async def create_invite_code(db: AsyncSession, current_user: User, max_uses: int) -> InviteCode:
-    invite = InviteCode(owner_id=current_user.id, code=token_urlsafe(12), max_uses=max_uses)
+    # Keep one stable personal code per user instead of issuing a new one on each request.
+    result = await db.execute(select(InviteCode).where(InviteCode.owner_id == current_user.id).order_by(InviteCode.created_at.desc()))
+    invite = result.scalars().first()
+    if invite is not None:
+        desired_max_uses = max(invite.max_uses, max_uses, PERSONAL_INVITE_MAX_USES)
+        if invite.max_uses != desired_max_uses:
+            invite.max_uses = desired_max_uses
+            await db.commit()
+            await db.refresh(invite)
+        return invite
+
+    invite = InviteCode(
+        owner_id=current_user.id,
+        code=token_urlsafe(12),
+        max_uses=max(max_uses, PERSONAL_INVITE_MAX_USES),
+    )
     db.add(invite)
     await db.commit()
     await db.refresh(invite)
