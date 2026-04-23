@@ -515,7 +515,9 @@ function Dashboard({
           />
         ) : null}
         {section === "home" ? <HomePanel friends={friends} /> : null}
-        {section === "chats" ? <ChatsPanel token={session.token} me={session.user} friends={friends} /> : null}
+        <div style={{ display: section === "chats" ? "block" : "none" }}>
+          <ChatsPanel token={session.token} me={session.user} friends={friends} />
+        </div>
         {section === "friends" ? (
           <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
         ) : null}
@@ -1310,6 +1312,7 @@ function ChatsPanel({
   const [pinnedChatIds, setPinnedChatIds] = React.useState<string[]>(() => readStoredStringList(PINNED_CHATS_STORAGE_KEY));
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
+  const [messagesLoading, setMessagesLoading] = React.useState(false);
 
   const createParticipantsDropdownRef = React.useRef<HTMLDivElement | null>(null);
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -1318,6 +1321,10 @@ function ChatsPanel({
   const editAvatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const editBackgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
+  const selectedChatIdRef = React.useRef<string>("");
+  const messageRequestRef = React.useRef(0);
+  const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
+  const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
   const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
@@ -1338,6 +1345,23 @@ function ChatsPanel({
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
   const canModerateAllMessages = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
+  const currentUserPublic = React.useMemo<UserPublic>(
+    () => ({
+      id: me.id,
+      username: me.username,
+      display_name: me.display_name,
+      nickname: me.nickname,
+      profile_status: me.profile_status,
+      profile_banner_url: me.profile_banner_url,
+      profile_background_url: me.profile_background_url,
+      profile_photos: JSON.stringify(me.profile_photos ?? []),
+      avatar_ring_style: me.avatar_ring_style,
+      avatar_url: me.avatar_url,
+      status: me.status,
+      current_game: me.current_game,
+    }),
+    [me],
+  );
   const chatPaneStyle: React.CSSProperties | undefined = selectedChat?.background_url
     ? {
         backgroundImage: `linear-gradient(rgb(75 18 32 / 80%), rgb(75 18 32 / 90%)), url("${selectedChat.background_url}")`,
@@ -1362,6 +1386,10 @@ function ChatsPanel({
   }, [token]);
 
   React.useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
+
+  React.useEffect(() => {
     if (orderedChats.length === 0) {
       if (selectedChatId) {
         setSelectedChatId("");
@@ -1378,42 +1406,69 @@ function ChatsPanel({
     if (!selectedChatId) {
       setMessages([]);
       setDecodeMap({});
+      setMessagesLoading(false);
       return;
     }
-    void listChatMessages(token, selectedChatId).then(setMessages);
+    void loadChatMessages(selectedChatId);
   }, [selectedChatId, token]);
 
   React.useEffect(() => {
     const socket = connectRealtime(token, (event: RealtimeEvent) => {
       if (event.type === "message.new") {
         const incoming = event.message as Message;
-        if (incoming.chat_id === selectedChatId) {
-          setMessages((previous) => (previous.some((item) => item.id === incoming.id) ? previous : [...previous, incoming]));
+        bumpChatActivity(incoming.chat_id, incoming.created_at);
+        if (incoming.chat_id === selectedChatIdRef.current) {
+          setMessages((previous) => {
+            if (previous.some((item) => item.id === incoming.id)) {
+              return previous;
+            }
+            const next = [...previous, incoming];
+            chatMessagesCacheRef.current[incoming.chat_id] = next;
+            return next;
+          });
+          void decodeMessagesForChat(incoming.chat_id, [incoming]);
         }
-        void reloadChats();
         return;
       }
 
       if (event.type === "message.updated") {
         const incoming = event.message as Message;
-        if (incoming.chat_id === selectedChatId) {
-          setMessages((previous) => previous.map((item) => (item.id === incoming.id ? incoming : item)));
+        if (incoming.chat_id === selectedChatIdRef.current) {
+          setMessages((previous) => {
+            const next = previous.map((item) => (item.id === incoming.id ? incoming : item));
+            chatMessagesCacheRef.current[incoming.chat_id] = next;
+            return next;
+          });
+          void decodeMessagesForChat(incoming.chat_id, [incoming]);
         }
         return;
       }
 
       if (event.type === "message.deleted") {
-        if (event.chat_id === selectedChatId) {
+        const deletedChatId = typeof event.chat_id === "string" ? event.chat_id : "";
+        if (deletedChatId === selectedChatIdRef.current) {
           const deletedId = typeof event.message_id === "string" ? event.message_id : "";
           if (deletedId) {
-            setMessages((previous) => previous.filter((item) => item.id !== deletedId));
+            setMessages((previous) => {
+              const next = previous.filter((item) => item.id !== deletedId);
+              chatMessagesCacheRef.current[deletedChatId] = next;
+              return next;
+            });
+            setDecodeMap((previous) => {
+              const next = { ...previous };
+              delete next[deletedId];
+              return next;
+            });
+            if (decodedMessagesCacheRef.current[deletedChatId]) {
+              delete decodedMessagesCacheRef.current[deletedChatId][deletedId];
+            }
           }
         }
         return;
       }
     });
     return () => socket.close();
-  }, [selectedChatId, token]);
+  }, [token]);
 
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -1427,10 +1482,6 @@ function ChatsPanel({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  React.useEffect(() => {
-    void decodeMessages(messages);
-  }, [messages, selectedChatId]);
 
   React.useEffect(() => {
     if (!selectedChat) {
@@ -1463,20 +1514,65 @@ function ChatsPanel({
     setChats(response.chats);
   }
 
-  async function decodeMessages(items: Message[]) {
-    if (!selectedChatId) {
-      return;
-    }
-    const key = await ensureChatKey(selectedChatId);
-    const decoded: Record<string, string> = {};
-    for (const message of items) {
-      try {
-        decoded[message.id] = await decryptTextWithSharedKey({ ciphertext: message.ciphertext, nonce: message.nonce }, key);
-      } catch {
-        decoded[message.id] = message.ciphertext;
+  function bumpChatActivity(chatId: string, updatedAt: string) {
+    setChats((previous) =>
+      previous.map((chat) => (chat.id === chatId ? { ...chat, updated_at: updatedAt } : chat)),
+    );
+  }
+
+  async function decodeMessagesForChat(chatId: string, items: Message[]): Promise<Record<string, string>> {
+    const existing = decodedMessagesCacheRef.current[chatId] ?? {};
+    const nextDecoded: Record<string, string> = { ...existing };
+    const pendingItems = items.filter((message) => nextDecoded[message.id] === undefined);
+    if (pendingItems.length > 0) {
+      const key = await ensureChatKey(chatId);
+      const resolvedEntries = await Promise.all(
+        pendingItems.map(async (message) => {
+          try {
+            const plain = await decryptTextWithSharedKey({ ciphertext: message.ciphertext, nonce: message.nonce }, key);
+            return [message.id, plain] as const;
+          } catch {
+            return [message.id, "Не удалось расшифровать сообщение"] as const;
+          }
+        }),
+      );
+      for (const [messageId, value] of resolvedEntries) {
+        nextDecoded[messageId] = value;
       }
     }
-    setDecodeMap(decoded);
+    decodedMessagesCacheRef.current[chatId] = nextDecoded;
+    return nextDecoded;
+  }
+
+  async function loadChatMessages(chatId: string) {
+    const requestId = messageRequestRef.current + 1;
+    messageRequestRef.current = requestId;
+
+    const cachedMessages = chatMessagesCacheRef.current[chatId];
+    const cachedDecoded = decodedMessagesCacheRef.current[chatId];
+    if (cachedMessages) {
+      setMessages(cachedMessages);
+      setDecodeMap(cachedDecoded ?? {});
+    } else {
+      setMessages([]);
+      setDecodeMap({});
+      setMessagesLoading(true);
+    }
+
+    try {
+      const fetchedMessages = await listChatMessages(token, chatId);
+      const decoded = await decodeMessagesForChat(chatId, fetchedMessages);
+      if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
+        return;
+      }
+      chatMessagesCacheRef.current[chatId] = fetchedMessages;
+      setMessages(fetchedMessages);
+      setDecodeMap(decoded);
+    } finally {
+      if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
+        setMessagesLoading(false);
+      }
+    }
   }
 
   function toggleParticipant(username: string) {
@@ -1631,13 +1727,13 @@ function ChatsPanel({
     }
   }
 
-  async function sendEncryptedText(text: string) {
+  async function sendEncryptedText(text: string): Promise<Message> {
     if (!selectedChatId) {
       throw new Error("Чат не выбран");
     }
     const key = await ensureChatKey(selectedChatId);
     const encrypted = await encryptTextForSharedKey(text, key);
-    await sendChatMessage(token, selectedChatId, {
+    return sendChatMessage(token, selectedChatId, {
       ciphertext: encrypted.ciphertext,
       nonce: encrypted.nonce,
       message_type: "text",
@@ -1692,8 +1788,43 @@ function ChatsPanel({
 
     try {
       if (text) {
+        const optimisticId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const optimisticMessage: Message = {
+          id: optimisticId,
+          chat_id: selectedChatId,
+          sender: currentUserPublic,
+          ciphertext: "",
+          nonce: "",
+          message_type: "text",
+          expires_at: "",
+          created_at: new Date().toISOString(),
+        };
+        setMessages((previous) => {
+          const next = [...previous, optimisticMessage];
+          chatMessagesCacheRef.current[selectedChatId] = next;
+          return next;
+        });
+        setDecodeMap((previous) => {
+          const next = { ...previous, [optimisticId]: text };
+          decodedMessagesCacheRef.current[selectedChatId] = next;
+          return next;
+        });
+        bumpChatActivity(selectedChatId, optimisticMessage.created_at);
+        setMessageText("");
         setStatus("Отправляем сообщение...");
-        await sendEncryptedText(text);
+        const sentMessage = await sendEncryptedText(text);
+        setMessages((previous) => {
+          const next = previous.map((item) => (item.id === optimisticId ? sentMessage : item));
+          chatMessagesCacheRef.current[selectedChatId] = next;
+          return next;
+        });
+        setDecodeMap((previous) => {
+          const next = { ...previous, [sentMessage.id]: text };
+          delete next[optimisticId];
+          decodedMessagesCacheRef.current[selectedChatId] = next;
+          return next;
+        });
+        bumpChatActivity(selectedChatId, sentMessage.created_at);
       }
       if (attachmentFiles.length > 0) {
         const batches = chunkArray(attachmentFiles, 10);
@@ -1709,17 +1840,31 @@ function ChatsPanel({
             }),
             chatKey,
           );
-          await sendChatMessage(token, selectedChatId, {
+          const sentBatchMessage = await sendChatMessage(token, selectedChatId, {
             ciphertext: encryptedPayload.ciphertext,
             nonce: encryptedPayload.nonce,
             message_type: "media",
           });
+          bumpChatActivity(selectedChatId, sentBatchMessage.created_at);
         }
       }
-      setMessageText("");
       setAttachmentFiles([]);
       setStatus("");
     } catch (error) {
+      if (text) {
+        setMessages((previous) => previous.filter((item) => !item.id.startsWith("local-")));
+        setDecodeMap((previous) => {
+          const next = { ...previous };
+          for (const messageId of Object.keys(next)) {
+            if (messageId.startsWith("local-")) {
+              delete next[messageId];
+            }
+          }
+          decodedMessagesCacheRef.current[selectedChatId] = next;
+          return next;
+        });
+        setMessageText(text);
+      }
       setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
     }
   }
@@ -2217,6 +2362,7 @@ function ChatsPanel({
         ) : null}
 
         <div className="message-list" ref={messageListRef}>
+          {messagesLoading ? <p className="form-status">Загружаем сообщения...</p> : null}
           {messages.map((message) => (
             <div
               className={`message ${message.sender.id === me.id ? "mine" : ""}`}
@@ -2258,11 +2404,11 @@ function ChatsPanel({
                   token={token}
                 />
               ) : (
-                <p>{decodeMap[message.id] ?? "..."}</p>
+                <p>{decodeMap[message.id] ?? ""}</p>
               )}
             </div>
           ))}
-          {selectedChatId && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
+          {selectedChatId && !messagesLoading && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
         </div>
 
         {contextMenu ? (
