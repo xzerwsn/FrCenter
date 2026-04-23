@@ -560,6 +560,8 @@ function ProfilePanel({
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [publishOpen, setPublishOpen] = React.useState(false);
+  const [editingPublicationIndex, setEditingPublicationIndex] = React.useState<number | null>(null);
+  const [openedPublication, setOpenedPublication] = React.useState<ProfilePhoto | null>(null);
   const [publishImageUrl, setPublishImageUrl] = React.useState("");
   const [publishCaption, setPublishCaption] = React.useState("");
   const [statusText, setStatusText] = React.useState("");
@@ -680,99 +682,138 @@ function ProfilePanel({
     }
     setStatusText("Публикуем...");
     try {
-      const nextPhotos: ProfilePhoto[] = [
-        {
-          url: publishImageUrl,
-          caption: publishCaption.trim() || null,
-        },
-        ...ownProfilePhotos,
-      ].slice(0, 30);
+      const nextPublication: ProfilePhoto = {
+        url: publishImageUrl,
+        caption: publishCaption.trim() || null,
+      };
+      const nextPhotos: ProfilePhoto[] =
+        editingPublicationIndex === null
+          ? [nextPublication, ...ownProfilePhotos].slice(0, 30)
+          : ownProfilePhotos.map((photo, index) => (index === editingPublicationIndex ? nextPublication : photo));
       const updated = await updateMe(token, {
         profile_photos: nextPhotos,
       });
       onSessionUserUpdate(updated);
       setPublishImageUrl("");
       setPublishCaption("");
+      setEditingPublicationIndex(null);
       setPublishOpen(false);
-      setStatusText("Публикация добавлена");
+      setStatusText(editingPublicationIndex === null ? "Публикация добавлена" : "Публикация обновлена");
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : "Не удалось создать публикацию");
+      setStatusText(error instanceof Error ? error.message : "Не удалось сохранить публикацию");
     }
   }
 
   return (
     <section className="tool-band profile-band">
-      <div className="profile-panel">
-        <h2>Профиль</h2>
-        <div
-          className="profile-header-card"
-          style={cardBackground ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 76%), rgb(19 17 29 / 84%)), url("${cardBackground}")` } : undefined}
-        >
-          {isOwnProfile ? (
-            <div className="profile-menu-wrap" ref={menuRef}>
-              <button className="profile-menu-button" onClick={() => setMenuOpen((open) => !open)} type="button">
-                <MoreHorizontal size={18} />
-              </button>
-              {menuOpen ? (
-                <div className="profile-menu-dropdown">
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setSettingsOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Настройки
+      <div
+        className="profile-panel profile-layout-card"
+        style={cardBackground ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 68%), rgb(19 17 29 / 86%)), url("${cardBackground}")` } : undefined}
+      >
+        <div className="profile-layout-head">
+          <h2>Профиль</h2>
+        </div>
+        <div className="profile-layout-grid">
+          <div className="profile-primary-column">
+            <div className="profile-header-card">
+              {isOwnProfile ? (
+                <div className="profile-menu-wrap" ref={menuRef}>
+                  <button className="profile-menu-button" onClick={() => setMenuOpen((open) => !open)} type="button">
+                    <MoreHorizontal size={18} />
                   </button>
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setPublishOpen(true);
-                    }}
-                    type="button"
-                  >
-                    Публикация
-                  </button>
+                  {menuOpen ? (
+                    <div className="profile-menu-dropdown">
+                      <button
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setSettingsOpen(true);
+                        }}
+                        type="button"
+                      >
+                        Настройки
+                      </button>
+                      <button
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setEditingPublicationIndex(null);
+                          setPublishImageUrl("");
+                          setPublishCaption("");
+                          setPublishOpen(true);
+                        }}
+                        type="button"
+                      >
+                        Публикация
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
-            </div>
-          ) : null}
-          <div className="profile-banner-strip">{cardBanner ? <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} /> : null}</div>
-          <div className={`profile-avatar-ring ring-${cardRing}`}>
-            <div className="profile-avatar-core">
-              {cardAvatar ? <img alt={profile.username} src={cardAvatar} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
-            </div>
-          </div>
-          <div className="profile-main-meta">
-            <strong>{cardName}</strong>
-            <span>@{cardUsername}</span>
-            <span>{cardStatus}</span>
-          </div>
-        </div>
-        <div className="result-row">
-          <span>
-            <b>{profile.username}</b> · {status}
-          </span>
-          <UserRound size={18} />
-        </div>
-        <p className="form-status">Текущая игра: {game}</p>
-        {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
-        {statusText ? <p className="form-status">{statusText}</p> : null}
-      </div>
-      <div className="profile-settings-panel">
-        <h2>Публикации</h2>
-        {profilePhotos.length > 0 ? (
-          <div className="profile-photo-grid">
-            {profilePhotos.map((photo, index) => (
-              <div className="profile-photo-card" key={`${photo.url.slice(0, 24)}-${index}`}>
-                <img alt={`Фото ${index + 1}`} src={photo.url} />
-                <p className="form-status">{photo.caption || "Без подписи"}</p>
+              <div className="profile-banner-strip">
+                {cardBanner ? <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} /> : null}
               </div>
-            ))}
+              <div className="profile-identity-row">
+                <div className={`profile-avatar-ring ring-${cardRing}`}>
+                  <div className="profile-avatar-core">
+                    {cardAvatar ? <img alt={profile.username} src={cardAvatar} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
+                  </div>
+                </div>
+                <div className="profile-main-meta">
+                  <strong>{cardName}</strong>
+                  <span>@{cardUsername}</span>
+                  <span>{cardStatus}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="profile-info-card">
+              <div className="profile-info-line profile-info-head">
+                <span className="profile-info-name">{cardUsername}</span>
+                <span className={`status-pill status-${normalizeStatus(status)}`}>{humanizeStatus(status)}</span>
+              </div>
+              <div className="profile-info-list">
+                <p>Текущая игра: {game}</p>
+                {"email" in profile ? <p>Email: {profile.email}</p> : null}
+                {statusText ? <p>{statusText}</p> : null}
+              </div>
+            </div>
           </div>
-        ) : (
-          <p className="form-status">Публикаций пока нет</p>
-        )}
+
+          <div className="profile-publications-panel">
+            <div className="profile-publications-head">
+              <h2>Публикации</h2>
+              <span>{profilePhotos.length}</span>
+            </div>
+            {profilePhotos.length > 0 ? (
+              <div className="profile-photo-grid">
+                {profilePhotos.map((photo, index) => (
+                  <article className="profile-photo-card" key={`${photo.url.slice(0, 24)}-${index}`}>
+                    {isOwnProfile ? (
+                      <button
+                        aria-label="Редактировать публикацию"
+                        className="profile-photo-edit"
+                        onClick={() => {
+                          setEditingPublicationIndex(index);
+                          setPublishImageUrl(photo.url);
+                          setPublishCaption(photo.caption ?? "");
+                          setPublishOpen(true);
+                        }}
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    ) : null}
+                    <button className="profile-photo-open" onClick={() => setOpenedPublication(photo)} type="button">
+                      <img alt={`Фото ${index + 1}`} src={photo.url} />
+                      <p className="form-status">{photo.caption || "Без подписи"}</p>
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="form-status">Публикаций пока нет</p>
+            )}
+          </div>
+        </div>
       </div>
 
       {isOwnProfile && settingsOpen ? (
@@ -843,7 +884,7 @@ function ProfilePanel({
         <div className="create-chat-modal-overlay" onClick={() => setPublishOpen(false)}>
           <div className="create-chat-modal profile-modal" onClick={(event) => event.stopPropagation()}>
             <div className="create-chat-modal-header">
-              <h3>Новая публикация</h3>
+              <h3>{editingPublicationIndex === null ? "Новая публикация" : "Редактирование публикации"}</h3>
               <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setPublishOpen(false)} type="button">
                 <X size={16} />
               </button>
@@ -870,8 +911,25 @@ function ProfilePanel({
                 Подпись
                 <input maxLength={240} onChange={(event) => setPublishCaption(event.target.value)} value={publishCaption} />
               </label>
-              <button type="submit">Опубликовать</button>
+              <button type="submit">{editingPublicationIndex === null ? "Опубликовать" : "Сохранить"}</button>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {openedPublication ? (
+        <div className="create-chat-modal-overlay" onClick={() => setOpenedPublication(null)}>
+          <div className="profile-publication-lightbox" onClick={(event) => event.stopPropagation()}>
+            <button
+              aria-label="Закрыть публикацию"
+              className="create-chat-modal-close profile-lightbox-close"
+              onClick={() => setOpenedPublication(null)}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+            <img alt={openedPublication.caption || "Публикация"} src={openedPublication.url} />
+            {openedPublication.caption ? <p>{openedPublication.caption}</p> : null}
           </div>
         </div>
       ) : null}
