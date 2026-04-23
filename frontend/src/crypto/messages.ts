@@ -59,3 +59,17 @@ export async function encryptBytesForSharedKey(
     nonce: bytesToBase64(nonce),
   };
 }
+
+export async function decryptBytesWithSharedKey(
+  ciphertextBytes: Uint8Array,
+  nonceBase64: string,
+  sharedKeyBase64: string,
+): Promise<Uint8Array> {
+  await sodium.ready;
+  const decrypted = sodium.crypto_secretbox_open_easy(
+    ciphertextBytes,
+    base64ToBytes(nonceBase64),
+    base64ToBytes(sharedKeyBase64),
+  );
+  return decrypted;
+}

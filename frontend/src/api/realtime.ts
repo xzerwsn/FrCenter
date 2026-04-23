@@ -7,6 +7,16 @@ export type RealtimeEvent =
       message: unknown;
     }
   | {
+      type: "message.updated";
+      chat_id: string;
+      message: unknown;
+    }
+  | {
+      type: "message.deleted";
+      chat_id: string;
+      message_id: string;
+    }
+  | {
       type: string;
       [key: string]: unknown;
     };

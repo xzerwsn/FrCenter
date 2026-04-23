@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import ReactDOM from "react-dom/client";
 import {
   Bell,
@@ -20,10 +20,12 @@ import {
   addGroupMember,
   createDirectChat,
   createGroupChat,
+  deleteChatMessage,
   listChatMessages,
   listChats,
   removeGroupMember,
   sendChatMessage,
+  updateChatMessage,
   updateGroupMemberRole,
 } from "../api/chats";
 import { registerDevice } from "../api/devices";
@@ -34,6 +36,7 @@ import { getMe, type CurrentUser, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import {
   createSharedMessageKey,
+  decryptBytesWithSharedKey,
   decryptTextWithSharedKey,
   encryptBytesForSharedKey,
   encryptTextForSharedKey,
@@ -46,6 +49,12 @@ type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "notifications" | "games" | "clips" | "settings";
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
+
+type MessageContextMenuState = {
+  message: Message;
+  x: number;
+  y: number;
+};
 
 function App() {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
@@ -112,7 +121,7 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       <section className="auth-panel">
         <div className="brand auth-brand">FC</div>
         <h1>FrCenter</h1>
-        <p>Вход в игровой E2EE-центр для друзей, чатов и новостей.</p>
+        <p>Р’С…РѕРґ РІ РёРіСЂРѕРІРѕР№ E2EE-С†РµРЅС‚СЂ РґР»СЏ РґСЂСѓР·РµР№, С‡Р°С‚РѕРІ Рё РЅРѕРІРѕСЃС‚РµР№.</p>
         {children}
       </section>
     </main>
@@ -133,13 +142,13 @@ function LoginForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Входим...");
+    setStatus("Р’С…РѕРґРёРј...");
     try {
       const response = await login(email, password);
       await onLogin(response.access_token, cloudPassword);
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось войти");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё");
     }
   }
 
@@ -150,16 +159,16 @@ function LoginForm({
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
       </label>
       <label>
-        Пароль
+        РџР°СЂРѕР»СЊ
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
       </label>
       <label>
-        Облачный пароль
+        РћР±Р»Р°С‡РЅС‹Р№ РїР°СЂРѕР»СЊ
         <input value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} type="password" required />
       </label>
-      <button type="submit">Войти</button>
+      <button type="submit">Р’РѕР№С‚Рё</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        Создать аккаунт
+        РЎРѕР·РґР°С‚СЊ Р°РєРєР°СѓРЅС‚
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -181,7 +190,7 @@ function RegisterForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Создаем аккаунт...");
+    setStatus("РЎРѕР·РґР°РµРј Р°РєРєР°СѓРЅС‚...");
     try {
       const response = await register({
         email,
@@ -191,7 +200,7 @@ function RegisterForm({
       });
       onRegistered(response.email, response.dev_confirmation_code ?? null);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось зарегистрироваться");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ");
     }
   }
 
@@ -209,12 +218,12 @@ function RegisterForm({
           minLength={3}
           maxLength={32}
           pattern="[A-Za-z0-9_]+"
-          title="Только латинские буквы, цифры и _ (3-32 символа)"
+          title="РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё _ (3-32 СЃРёРјРІРѕР»Р°)"
           required
         />
       </label>
       <label>
-        Пароль
+        РџР°СЂРѕР»СЊ
         <input
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -225,7 +234,7 @@ function RegisterForm({
         />
       </label>
       <label>
-        Облачный пароль
+        РћР±Р»Р°С‡РЅС‹Р№ РїР°СЂРѕР»СЊ
         <input
           value={cloudPassword}
           onChange={(event) => setCloudPassword(event.target.value)}
@@ -235,9 +244,9 @@ function RegisterForm({
           required
         />
       </label>
-      <button type="submit">Зарегистрироваться</button>
+      <button type="submit">Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        Уже есть аккаунт
+        РЈР¶Рµ РµСЃС‚СЊ Р°РєРєР°СѓРЅС‚
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -257,17 +266,17 @@ function ConfirmForm({
 }) {
   const [email, setEmail] = React.useState(defaultEmail);
   const [code, setCode] = React.useState(devCode ?? "");
-  const [status, setStatus] = React.useState(devCode ? `Dev-код: ${devCode}` : "");
+  const [status, setStatus] = React.useState(devCode ? `Dev-РєРѕРґ: ${devCode}` : "");
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Подтверждаем...");
+    setStatus("РџРѕРґС‚РІРµСЂР¶РґР°РµРј...");
     try {
       await confirmEmail(email, code);
-      setStatus("Email подтвержден, можно войти");
+      setStatus("Email РїРѕРґС‚РІРµСЂР¶РґРµРЅ, РјРѕР¶РЅРѕ РІРѕР№С‚Рё");
       onConfirmed();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось подтвердить email");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґС‚РІРµСЂРґРёС‚СЊ email");
     }
   }
 
@@ -278,12 +287,12 @@ function ConfirmForm({
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
       </label>
       <label>
-        Код подтверждения
+        РљРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ
         <input value={code} onChange={(event) => setCode(event.target.value)} required />
       </label>
-      <button type="submit">Подтвердить</button>
+      <button type="submit">РџРѕРґС‚РІРµСЂРґРёС‚СЊ</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        Вернуться ко входу
+        Р’РµСЂРЅСѓС‚СЊСЃСЏ РєРѕ РІС…РѕРґСѓ
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -319,38 +328,38 @@ function Dashboard({
     <main className="shell">
       <aside className="sidebar">
         <button
-          aria-label="Профиль"
+          aria-label="РџСЂРѕС„РёР»СЊ"
           className={`profile-button ${section === "profile" ? "active" : ""}`}
           onClick={openOwnProfile}
           type="button"
         >
           <div className="brand">{session.user.username.slice(0, 1).toUpperCase()}</div>
         </button>
-        <button aria-label="Главная" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
+        <button aria-label="Р“Р»Р°РІРЅР°СЏ" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
           <Home size={20} />
         </button>
-        <button aria-label="Чаты" className={section === "chats" ? "active" : ""} onClick={() => setSection("chats")} type="button">
+        <button aria-label="Р§Р°С‚С‹" className={section === "chats" ? "active" : ""} onClick={() => setSection("chats")} type="button">
           <MessageCircle size={20} />
         </button>
-        <button aria-label="Друзья" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
+        <button aria-label="Р”СЂСѓР·СЊСЏ" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
           <Users size={20} />
         </button>
         <button
-          aria-label="Уведомления"
+          aria-label="РЈРІРµРґРѕРјР»РµРЅРёСЏ"
           className={section === "notifications" ? "active" : ""}
           onClick={() => setSection("notifications")}
           type="button"
         >
           <Bell size={20} />
         </button>
-        <button aria-label="Игровая зона" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
+        <button aria-label="РРіСЂРѕРІР°СЏ Р·РѕРЅР°" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
           <Gamepad2 size={20} />
         </button>
-        <button aria-label="Клипы" className={section === "clips" ? "active" : ""} onClick={() => setSection("clips")} type="button">
+        <button aria-label="РљР»РёРїС‹" className={section === "clips" ? "active" : ""} onClick={() => setSection("clips")} type="button">
           <PlaySquare size={20} />
         </button>
         <button
-          aria-label="Настройки"
+          aria-label="РќР°СЃС‚СЂРѕР№РєРё"
           className={section === "settings" ? "active" : ""}
           onClick={() => setSection("settings")}
           type="button"
@@ -362,11 +371,11 @@ function Dashboard({
       <section className="content">
         <header className="topbar">
           <p>
-            Добро пожаловать, <strong>{session.user.username.toUpperCase()}</strong>
+            Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ, <strong>{session.user.username.toUpperCase()}</strong>
           </p>
           <div className="topbar-actions">
-            <input placeholder="Поиск" />
-            <button aria-label="Выйти" onClick={onLogout} type="button">
+            <input placeholder="РџРѕРёСЃРє" />
+            <button aria-label="Р’С‹Р№С‚Рё" onClick={onLogout} type="button">
               <LogOut size={18} />
             </button>
           </div>
@@ -397,22 +406,22 @@ function Dashboard({
 }
 
 function ProfilePanel({ profile }: { profile: UserPublic | CurrentUser }) {
-  const game = profile.current_game ?? "Не играет";
+  const game = profile.current_game ?? "РќРµ РёРіСЂР°РµС‚";
   const status = profile.status || "offline";
   return (
     <section className="tool-band">
       <div>
-        <h2>Профиль</h2>
+        <h2>РџСЂРѕС„РёР»СЊ</h2>
         <div className="result-row">
           <span>
-            <b>{profile.username}</b> · {status}
+            <b>{profile.username}</b> В· {status}
           </span>
           <UserRound size={18} />
         </div>
-        <p className="form-status">Текущая игра: {game}</p>
+        <p className="form-status">РўРµРєСѓС‰Р°СЏ РёРіСЂР°: {game}</p>
       </div>
       <div>
-        <h2>Общее</h2>
+        <h2>РћР±С‰РµРµ</h2>
         {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
         <p className="form-status">ID: {profile.id}</p>
       </div>
@@ -424,9 +433,9 @@ function HomePanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>Главная</h2>
+        <h2>Р“Р»Р°РІРЅР°СЏ</h2>
         <div className="result-list">
-          {friends.length === 0 ? <p className="form-status">Пока нет друзей</p> : null}
+          {friends.length === 0 ? <p className="form-status">РџРѕРєР° РЅРµС‚ РґСЂСѓР·РµР№</p> : null}
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
@@ -443,10 +452,10 @@ function NotificationsPanel() {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>Уведомления</h2>
+        <h2>РЈРІРµРґРѕРјР»РµРЅРёСЏ</h2>
         <div className="result-list">
           <div className="result-row">
-            <span>Новых уведомлений пока нет</span>
+            <span>РќРѕРІС‹С… СѓРІРµРґРѕРјР»РµРЅРёР№ РїРѕРєР° РЅРµС‚</span>
           </div>
         </div>
       </div>
@@ -458,27 +467,27 @@ function GamesPanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band">
       <div>
-        <h2>Игровая зона</h2>
-        <p className="form-status">Steam и Riot: настройка интеграций будет в этом разделе.</p>
+        <h2>РРіСЂРѕРІР°СЏ Р·РѕРЅР°</h2>
+        <p className="form-status">Steam Рё Riot: РЅР°СЃС‚СЂРѕР№РєР° РёРЅС‚РµРіСЂР°С†РёР№ Р±СѓРґРµС‚ РІ СЌС‚РѕРј СЂР°Р·РґРµР»Рµ.</p>
         <div className="result-list">
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
-              <span>{friend.current_game ?? "Не играет"}</span>
+              <span>{friend.current_game ?? "РќРµ РёРіСЂР°РµС‚"}</span>
             </div>
           ))}
         </div>
       </div>
       <div>
-        <h2>Интеграции</h2>
+        <h2>РРЅС‚РµРіСЂР°С†РёРё</h2>
         <div className="result-list">
           <div className="result-row">
             <span>Steam</span>
-            <button type="button">Подключить</button>
+            <button type="button">РџРѕРґРєР»СЋС‡РёС‚СЊ</button>
           </div>
           <div className="result-row">
             <span>Riot Games</span>
-            <button type="button">Подключить</button>
+            <button type="button">РџРѕРґРєР»СЋС‡РёС‚СЊ</button>
           </div>
         </div>
       </div>
@@ -490,13 +499,13 @@ function ClipsPanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>Клипы</h2>
-        <p className="form-status">Медиа-посты друзей (видео/фото) будут отображаться здесь.</p>
+        <h2>РљР»РёРїС‹</h2>
+        <p className="form-status">РњРµРґРёР°-РїРѕСЃС‚С‹ РґСЂСѓР·РµР№ (РІРёРґРµРѕ/С„РѕС‚Рѕ) Р±СѓРґСѓС‚ РѕС‚РѕР±СЂР°Р¶Р°С‚СЊСЃСЏ Р·РґРµСЃСЊ.</p>
         <div className="result-list">
           {friends.slice(0, 6).map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
-              <span>Публикаций: 0</span>
+              <span>РџСѓР±Р»РёРєР°С†РёР№: 0</span>
             </div>
           ))}
         </div>
@@ -515,26 +524,26 @@ function SettingsPanel({
   return (
     <section className="tool-band">
       <div>
-        <h2>Настройки</h2>
+        <h2>РќР°СЃС‚СЂРѕР№РєРё</h2>
         <div className="result-list">
           <label className="result-row">
-            <span>Темная тема</span>
+            <span>РўРµРјРЅР°СЏ С‚РµРјР°</span>
             <input checked={darkTheme} onChange={() => setDarkTheme((v) => !v)} type="checkbox" />
           </label>
           <label className="result-row">
-            <span>Запуск вместе с Windows</span>
+            <span>Р—Р°РїСѓСЃРє РІРјРµСЃС‚Рµ СЃ Windows</span>
             <input checked={autoStart} onChange={() => setAutoStart((v) => !v)} type="checkbox" />
           </label>
           <label className="result-row">
-            <span>Уведомления</span>
+            <span>РЈРІРµРґРѕРјР»РµРЅРёСЏ</span>
             <input checked={notifEnabled} onChange={() => setNotifEnabled((v) => !v)} type="checkbox" />
           </label>
         </div>
       </div>
       <div>
-        <h2>Безопасность</h2>
-        <p className="form-status">Сквозное шифрование работает автоматически.</p>
-        <p className="form-status">Ключи создаются и обновляются без ручных действий пользователя.</p>
+        <h2>Р‘РµР·РѕРїР°СЃРЅРѕСЃС‚СЊ</h2>
+        <p className="form-status">РЎРєРІРѕР·РЅРѕРµ С€РёС„СЂРѕРІР°РЅРёРµ СЂР°Р±РѕС‚Р°РµС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.</p>
+        <p className="form-status">РљР»СЋС‡Рё СЃРѕР·РґР°СЋС‚СЃСЏ Рё РѕР±РЅРѕРІР»СЏСЋС‚СЃСЏ Р±РµР· СЂСѓС‡РЅС‹С… РґРµР№СЃС‚РІРёР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.</p>
       </div>
     </section>
   );
@@ -569,35 +578,35 @@ function FriendsPanel({
 
   async function handleSearch(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Ищем...");
+    setStatus("РС‰РµРј...");
     try {
       const results = await searchUsers(token, query);
       setSearchResults(results);
-      setStatus(results.length ? "" : "Никого не нашли");
+      setStatus(results.length ? "" : "РќРёРєРѕРіРѕ РЅРµ РЅР°С€Р»Рё");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось найти пользователя");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ");
     }
   }
 
   async function handleRequest(username: string) {
-    setStatus("Отправляем заявку...");
+    setStatus("РћС‚РїСЂР°РІР»СЏРµРј Р·Р°СЏРІРєСѓ...");
     try {
       await sendFriendRequest(token, username);
-      setStatus("Заявка отправлена");
+      setStatus("Р—Р°СЏРІРєР° РѕС‚РїСЂР°РІР»РµРЅР°");
       await refreshFriends();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось отправить заявку");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°СЏРІРєСѓ");
     }
   }
 
   async function handleCreateInvite() {
-    setStatus("Создаем invite-код...");
+    setStatus("РЎРѕР·РґР°РµРј invite-РєРѕРґ...");
     try {
       const response = await createInviteCode(token);
       setInviteCode(response.code);
-      setStatus("Invite-код готов");
+      setStatus("Invite-РєРѕРґ РіРѕС‚РѕРІ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось создать invite-код");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ invite-РєРѕРґ");
     }
   }
 
@@ -616,39 +625,39 @@ function FriendsPanel({
     }
     try {
       await navigator.clipboard.writeText(inviteCode);
-      setStatus("Код скопирован");
+      setStatus("РљРѕРґ СЃРєРѕРїРёСЂРѕРІР°РЅ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось скопировать код");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ РєРѕРґ");
     }
   }
 
   async function handleAddByCode(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Добавляем друга...");
+    setStatus("Р”РѕР±Р°РІР»СЏРµРј РґСЂСѓРіР°...");
     try {
       await addFriendByCode(token, joinCode);
       setJoinCode("");
       await refreshFriends();
-      setStatus("Друг добавлен");
+      setStatus("Р”СЂСѓРі РґРѕР±Р°РІР»РµРЅ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось добавить по коду");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ РїРѕ РєРѕРґСѓ");
     }
   }
 
   return (
     <section className="tool-band">
       <div>
-        <h2>Друзья</h2>
+        <h2>Р”СЂСѓР·СЊСЏ</h2>
         <form className="inline-form" onSubmit={handleSearch}>
           <input placeholder="Username" value={query} onChange={(event) => setQuery(event.target.value)} required />
-          <button type="submit">Найти</button>
+          <button type="submit">РќР°Р№С‚Рё</button>
         </form>
         <div className="result-list">
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
               <button onClick={() => onOpenProfile(friend)} type="button">
-                Профиль
+                РџСЂРѕС„РёР»СЊ
               </button>
             </div>
           ))}
@@ -658,7 +667,7 @@ function FriendsPanel({
             <div className="result-row" key={user.id}>
               <span>{user.username}</span>
               <button onClick={() => handleRequest(user.username)} type="button">
-                Заявка
+                Р—Р°СЏРІРєР°
               </button>
             </div>
           ))}
@@ -668,19 +677,19 @@ function FriendsPanel({
       <div>
         <h2>Invite</h2>
         <button className="inline-action" onClick={handleCreateInvite} type="button">
-          Создать код
+          РЎРѕР·РґР°С‚СЊ РєРѕРґ
         </button>
         {inviteCode ? (
           <div className="invite-code-row">
             <small className="invite-code">{inviteCode}</small>
             <button className="inline-action" onClick={handleCopyInviteCode} type="button">
-              Скопировать
+              РЎРєРѕРїРёСЂРѕРІР°С‚СЊ
             </button>
           </div>
         ) : null}
         <form className="inline-form stacked" onSubmit={handleAddByCode}>
-          <input placeholder="Код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
-          <button type="submit">Добавить</button>
+          <input placeholder="РљРѕРґ РґСЂСѓРіР°" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
+          <button type="submit">Р”РѕР±Р°РІРёС‚СЊ</button>
         </form>
       </div>
       {status ? <p className="form-status">{status}</p> : null}
@@ -710,13 +719,18 @@ function ChatsPanel({
   const [directDropdownOpen, setDirectDropdownOpen] = React.useState(false);
   const [groupDropdownOpen, setGroupDropdownOpen] = React.useState(false);
   const [groupSettingsOpen, setGroupSettingsOpen] = React.useState(false);
+  const [contextMenu, setContextMenu] = React.useState<MessageContextMenuState | null>(null);
+  const [previewMediaUrl, setPreviewMediaUrl] = React.useState<string | null>(null);
+  const [previewMediaType, setPreviewMediaType] = React.useState<string>("");
   const [status, setStatus] = React.useState("");
   const directDropdownRef = React.useRef<HTMLDivElement | null>(null);
   const groupDropdownRef = React.useRef<HTMLDivElement | null>(null);
+  const messageListRef = React.useRef<HTMLDivElement | null>(null);
   const selectedChat = chats.find((chat) => chat.id === selectedChatId) ?? null;
   const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
+  const canModerateAllMessages = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
 
   React.useEffect(() => {
     void reloadChats();
@@ -732,14 +746,32 @@ function ChatsPanel({
 
   React.useEffect(() => {
     const socket = connectRealtime(token, (event: RealtimeEvent) => {
-      if (event.type !== "message.new") {
+      if (event.type === "message.new") {
+        const incoming = event.message as Message;
+        if (incoming.chat_id === selectedChatId) {
+          setMessages((previous) => (previous.some((item) => item.id === incoming.id) ? previous : [...previous, incoming]));
+        }
+        void reloadChats();
         return;
       }
-      const incoming = event.message as Message;
-      if (incoming.chat_id === selectedChatId) {
-        setMessages((previous) => (previous.some((item) => item.id === incoming.id) ? previous : [...previous, incoming]));
+
+      if (event.type === "message.updated") {
+        const incoming = event.message as Message;
+        if (incoming.chat_id === selectedChatId) {
+          setMessages((previous) => previous.map((item) => (item.id === incoming.id ? incoming : item)));
+        }
+        return;
       }
-      void reloadChats();
+
+      if (event.type === "message.deleted") {
+        if (event.chat_id === selectedChatId) {
+          const deletedId = typeof event.message_id === "string" ? event.message_id : "";
+          if (deletedId) {
+            setMessages((previous) => previous.filter((item) => item.id !== deletedId));
+          }
+        }
+        return;
+      }
     });
     return () => socket.close();
   }, [selectedChatId, token]);
@@ -753,6 +785,7 @@ function ChatsPanel({
       if (groupDropdownRef.current && !groupDropdownRef.current.contains(targetNode)) {
         setGroupDropdownOpen(false);
       }
+      setContextMenu(null);
     }
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -768,6 +801,14 @@ function ChatsPanel({
       setGroupSettingsOpen(false);
     }
   }, [selectedChat?.type]);
+
+  React.useEffect(() => {
+    const messageListElement = messageListRef.current;
+    if (!messageListElement) {
+      return;
+    }
+    messageListElement.scrollTop = messageListElement.scrollHeight;
+  }, [messages]);
 
   async function reloadChats() {
     const response = await listChats(token);
@@ -802,13 +843,63 @@ function ChatsPanel({
     });
   }
 
+  function canManageMessage(message: Message): boolean {
+    if (canModerateAllMessages) {
+      return true;
+    }
+    return message.sender.id === me.id;
+  }
+
+  async function handleEditMessage(message: Message) {
+    if (!selectedChatId || !canManageMessage(message)) {
+      return;
+    }
+    const currentText = decodeMap[message.id] ?? "";
+    const nextText = window.prompt("РќРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ", currentText);
+    if (nextText === null) {
+      return;
+    }
+    const trimmed = nextText.trim();
+    if (!trimmed) {
+      setStatus("РўРµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј");
+      return;
+    }
+    try {
+      const key = await ensureChatKey(selectedChatId);
+      const encrypted = await encryptTextForSharedKey(trimmed, key);
+      await updateChatMessage(token, selectedChatId, message.id, {
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        message_type: "text",
+      });
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
+    }
+  }
+
+  async function handleDeleteMessage(message: Message) {
+    if (!selectedChatId || !canManageMessage(message)) {
+      return;
+    }
+    if (!window.confirm("РЈРґР°Р»РёС‚СЊ СЌС‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ?")) {
+      return;
+    }
+    try {
+      await deleteChatMessage(token, selectedChatId, message.id);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
+    }
+  }
+
   async function handleCreateDirect(event: React.FormEvent) {
     event.preventDefault();
     if (!directUsername.trim()) {
-      setStatus("Выбери друга");
+      setStatus("Р’С‹Р±РµСЂРё РґСЂСѓРіР°");
       return;
     }
-    setStatus("Создаем direct-чат...");
+    setStatus("РЎРѕР·РґР°РµРј direct-С‡Р°С‚...");
     try {
       const chat = await createDirectChat(token, directUsername.trim());
       setDirectUsername("");
@@ -816,19 +907,19 @@ function ChatsPanel({
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
-      setStatus("Direct-чат готов");
+      setStatus("Direct-С‡Р°С‚ РіРѕС‚РѕРІ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось создать чат");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ С‡Р°С‚");
     }
   }
 
   async function handleCreateGroup(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Создаем групповой чат...");
+    setStatus("РЎРѕР·РґР°РµРј РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚...");
     try {
       const usernames = Array.from(new Set(groupUsernames.map((item) => item.trim()).filter((item) => item.length > 0)));
       if (usernames.length === 0) {
-        setStatus("Выбери хотя бы одного друга");
+        setStatus("Р’С‹Р±РµСЂРё С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕРіРѕ РґСЂСѓРіР°");
         return;
       }
       const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames });
@@ -838,9 +929,9 @@ function ChatsPanel({
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
-      setStatus("Групповой чат готов");
+      setStatus("Р“СЂСѓРїРїРѕРІРѕР№ С‡Р°С‚ РіРѕС‚РѕРІ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось создать групповой чат");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚");
     }
   }
 
@@ -849,16 +940,16 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("Добавляем участника...");
+    setStatus("Р”РѕР±Р°РІР»СЏРµРј СѓС‡Р°СЃС‚РЅРёРєР°...");
     try {
       const rotatedKey = await createSharedMessageKey();
       await addGroupMember(token, selectedChatId, memberUsername.trim(), rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       setMemberUsername("");
       await reloadChats();
-      setStatus("Участник добавлен");
+      setStatus("РЈС‡Р°СЃС‚РЅРёРє РґРѕР±Р°РІР»РµРЅ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось добавить участника");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР°");
     }
   }
 
@@ -866,13 +957,13 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("Обновляем роль...");
+    setStatus("РћР±РЅРѕРІР»СЏРµРј СЂРѕР»СЊ...");
     try {
       await updateGroupMemberRole(token, selectedChatId, { user_id: userId, role });
       await reloadChats();
-      setStatus("Роль обновлена");
+      setStatus("Р РѕР»СЊ РѕР±РЅРѕРІР»РµРЅР°");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось обновить роль");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЂРѕР»СЊ");
     }
   }
 
@@ -880,15 +971,15 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("Удаляем участника...");
+    setStatus("РЈРґР°Р»СЏРµРј СѓС‡Р°СЃС‚РЅРёРєР°...");
     try {
       const rotatedKey = await createSharedMessageKey();
       await removeGroupMember(token, selectedChatId, userId, rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       await reloadChats();
-      setStatus("Участник удален");
+      setStatus("РЈС‡Р°СЃС‚РЅРёРє СѓРґР°Р»РµРЅ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось удалить участника");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР°");
     }
   }
 
@@ -897,7 +988,7 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("Отправляем сообщение...");
+    setStatus("РћС‚РїСЂР°РІР»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ...");
     try {
       const key = await ensureChatKey(selectedChatId);
       const encrypted = await encryptTextForSharedKey(messageText, key);
@@ -909,7 +1000,7 @@ function ChatsPanel({
       setMessageText("");
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
     }
   }
 
@@ -918,7 +1009,7 @@ function ChatsPanel({
     if (!selectedChatId || !attachmentFile) {
       return;
     }
-    setStatus("Шифруем и отправляем вложение...");
+    setStatus("РЁРёС„СЂСѓРµРј Рё РѕС‚РїСЂР°РІР»СЏРµРј РІР»РѕР¶РµРЅРёРµ...");
     try {
       const chatKey = await ensureChatKey(selectedChatId);
       const fileBytes = new Uint8Array(await attachmentFile.arrayBuffer());
@@ -946,42 +1037,20 @@ function ChatsPanel({
         message_type: "media",
       });
       setAttachmentFile(null);
-      setStatus("Вложение отправлено");
+      setStatus("Р’Р»РѕР¶РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось отправить вложение");
-    }
-  }
-
-  async function handleDownloadMedia(mediaUrl: string, filename: string) {
-    try {
-      const response = await fetch(mediaUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error(`Не удалось скачать файл (${response.status})`);
-      }
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось скачать вложение");
+      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІР»РѕР¶РµРЅРёРµ");
     }
   }
 
   return (
     <section className={`chat-band ${selectedChat?.type === "direct" ? "direct-full-height" : ""}`}>
       <div className="chat-list-pane">
-        <h2>Чаты</h2>
+        <h2>Р§Р°С‚С‹</h2>
         <form className="inline-form" onSubmit={handleCreateDirect}>
           <div className="friend-select" ref={directDropdownRef}>
             <button className="friend-select-trigger" onClick={() => setDirectDropdownOpen((open) => !open)} type="button">
-              <span>{directUsername || "Username друга"}</span>
+              <span>{directUsername || "Username РґСЂСѓРіР°"}</span>
               <ChevronDown size={16} />
             </button>
             <div className={`friend-select-dropdown ${directDropdownOpen ? "open" : ""}`}>
@@ -1003,10 +1072,10 @@ function ChatsPanel({
           <button type="submit">Direct</button>
         </form>
         <form className="inline-form stacked" onSubmit={handleCreateGroup}>
-          <input placeholder="Название группы" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
+          <input placeholder="РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
           <div className="friend-select" ref={groupDropdownRef}>
             <button className="friend-select-trigger" onClick={() => setGroupDropdownOpen((open) => !open)} type="button">
-              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username друга"}</span>
+              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username РґСЂСѓРіР°"}</span>
               <ChevronDown size={16} />
             </button>
             <div className={`friend-select-dropdown ${groupDropdownOpen ? "open" : ""}`}>
@@ -1018,40 +1087,40 @@ function ChatsPanel({
               ))}
             </div>
           </div>
-          <button type="submit">Создать группу</button>
+          <button type="submit">РЎРѕР·РґР°С‚СЊ РіСЂСѓРїРїСѓ</button>
         </form>
         <div className="chat-list">
           {chats.map((chat) => (
             <button className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id} onClick={() => setSelectedChatId(chat.id)} type="button">
-              <strong>{chat.type === "group" ? chat.title ?? "Группа" : "Direct chat"}</strong>
-              <span>{chat.members.length} участника</span>
+              <strong>{chat.type === "group" ? chat.title ?? "Р“СЂСѓРїРїР°" : "Direct chat"}</strong>
+              <span>{chat.members.length} СѓС‡Р°СЃС‚РЅРёРєР°</span>
             </button>
           ))}
         </div>
       </div>
 
       <div className="chat-pane">
-        <h2>Сообщения</h2>
+        <h2>РЎРѕРѕР±С‰РµРЅРёСЏ</h2>
         {selectedChat?.type === "group" ? (
           <div className="chat-settings">
             <button className="chat-settings-toggle" onClick={() => setGroupSettingsOpen((open) => !open)} type="button">
-              Настройки чата
+              РќР°СЃС‚СЂРѕР№РєРё С‡Р°С‚Р°
               <ChevronDown className={groupSettingsOpen ? "rotated" : ""} size={16} />
             </button>
             <div className={`chat-settings-panel ${groupSettingsOpen ? "open" : ""}`}>
               <div className="result-list">
-                <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
+                <p className="form-status">РњРѕСЏ СЂРѕР»СЊ: {myMember?.role ?? "member"}</p>
                 {canManageMembers ? (
                   <form className="inline-form" onSubmit={handleAddMember}>
                     <input
-                      placeholder="Username участника"
+                      placeholder="Username СѓС‡Р°СЃС‚РЅРёРєР°"
                       value={memberUsername}
                       onChange={(event) => setMemberUsername(event.target.value)}
                       minLength={3}
                       maxLength={32}
                       required
                     />
-                    <button type="submit">Добавить</button>
+                    <button type="submit">Р”РѕР±Р°РІРёС‚СЊ</button>
                   </form>
                 ) : null}
                 {selectedChat.members.map((member) => (
@@ -1061,12 +1130,12 @@ function ChatsPanel({
                     </span>
                     {canManageRoles && member.role !== "owner" ? (
                       <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
-                        {member.role === "admin" ? "Снять admin" : "Сделать admin"}
+                        {member.role === "admin" ? "РЎРЅСЏС‚СЊ admin" : "РЎРґРµР»Р°С‚СЊ admin"}
                       </button>
                     ) : null}
                     {canManageMembers && member.role !== "owner" ? (
                       <button onClick={() => handleRemoveMember(member.user.id)} type="button">
-                        Удалить
+                        РЈРґР°Р»РёС‚СЊ
                       </button>
                     ) : null}
                   </div>
@@ -1076,55 +1145,201 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        <div className="message-list">
+        <div className="message-list" ref={messageListRef}>
           {messages.map((message) => (
-            <div className={`message ${message.sender.id === me.id ? "mine" : ""}`} key={message.id}>
-              <b>{message.sender.username}</b>
+            <div
+              className={`message ${message.sender.id === me.id ? "mine" : ""}`}
+              key={message.id}
+              onContextMenu={(event) => {
+                if (!canManageMessage(message)) {
+                  return;
+                }
+                event.preventDefault();
+                setContextMenu({
+                  message,
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
+            >
+              <div className="message-head">
+                <div className="message-author">
+                  <div className="message-avatar">
+                    {message.sender.avatar_url ? (
+                      <img alt={message.sender.username} src={message.sender.avatar_url} />
+                    ) : (
+                      message.sender.username.slice(0, 1).toUpperCase()
+                    )}
+                  </div>
+                  <b>{message.sender.username}</b>
+                </div>
+                <time>{formatMessageTime(message.created_at)}</time>
+              </div>
               {message.message_type === "media" ? (
-                <MediaMessageView raw={decodeMap[message.id] ?? ""} onDownload={handleDownloadMedia} />
+                <MediaMessageView
+                  chatId={selectedChatId}
+                  onPreview={(url, mediaType) => {
+                    setPreviewMediaUrl(url);
+                    setPreviewMediaType(mediaType);
+                  }}
+                  raw={decodeMap[message.id] ?? ""}
+                  token={token}
+                />
               ) : (
                 <p>{decodeMap[message.id] ?? "..."}</p>
               )}
             </div>
           ))}
         </div>
+        {contextMenu ? (
+          <div
+            className="message-context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {contextMenu.message.message_type === "text" ? (
+              <button
+                onClick={() => {
+                  void handleEditMessage(contextMenu.message);
+                  setContextMenu(null);
+                }}
+                type="button"
+              >
+                Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                void handleDeleteMessage(contextMenu.message);
+                setContextMenu(null);
+              }}
+              type="button"
+            >
+              РЈРґР°Р»РёС‚СЊ
+            </button>
+          </div>
+        ) : null}
 
         <form className="inline-form" onSubmit={handleSendMessage}>
-          <input placeholder="Сообщение" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
+          <input placeholder="РЎРѕРѕР±С‰РµРЅРёРµ" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
           <button disabled={!selectedChatId} type="submit">
-            Отправить
+            РћС‚РїСЂР°РІРёС‚СЊ
           </button>
         </form>
         <form className="inline-form" onSubmit={handleSendAttachment}>
           <input accept="*/*" onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)} type="file" />
           <button disabled={!selectedChatId || !attachmentFile} type="submit">
-            Отправить файл
+            РћС‚РїСЂР°РІРёС‚СЊ С„Р°Р№Р»
           </button>
         </form>
         {status ? <p className="form-status">{status}</p> : null}
+        {previewMediaUrl ? (
+          <div
+            className="media-preview-overlay"
+            onClick={() => {
+              setPreviewMediaUrl(null);
+              setPreviewMediaType("");
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="media-preview-dialog" onClick={(event) => event.stopPropagation()}>
+              {previewMediaType.startsWith("video/") ? (
+                <video className="media-preview-view" controls src={previewMediaUrl} />
+              ) : previewMediaType.startsWith("image/") ? (
+                <img alt="РњРµРґРёР°" className="media-preview-view" src={previewMediaUrl} />
+              ) : (
+                <a className="inline-action" href={previewMediaUrl} rel="noreferrer" target="_blank">
+                  Открыть файл в новой вкладке
+                </a>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );
 }
 
 function MediaMessageView({
+  chatId,
+  token,
   raw,
-  onDownload,
+  onPreview,
 }: {
+  chatId: string;
+  token: string;
   raw: string;
-  onDownload: (mediaUrl: string, filename: string) => void;
+  onPreview: (url: string, mediaType: string) => void;
 }) {
   const mediaPayload = parseMediaPayload(raw);
+  const [mediaUrl, setMediaUrl] = React.useState<string>("");
+  const [mediaError, setMediaError] = React.useState<string>("");
+
+  React.useEffect(() => {
+    let active = true;
+    let objectUrlToRevoke = "";
+
+    async function resolveMedia() {
+      if (!mediaPayload || !chatId) {
+        return;
+      }
+      try {
+        const response = await fetch(mediaPayload.media_url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          throw new Error(`Не удалось загрузить медиа (${response.status})`);
+        }
+        const encryptedBytes = new Uint8Array(await response.arrayBuffer());
+        const chatKey = await ensureChatKey(chatId);
+        const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, mediaPayload.file_nonce, chatKey);
+        const safeBytes = new Uint8Array(decryptedBytes.byteLength);
+        safeBytes.set(decryptedBytes);
+        const blob = new Blob([safeBytes.buffer], { type: mediaPayload.file_mime || "application/octet-stream" });
+        objectUrlToRevoke = URL.createObjectURL(blob);
+        if (active) {
+          setMediaUrl(objectUrlToRevoke);
+          setMediaError("");
+        }
+      } catch (error) {
+        if (active) {
+          setMediaError(error instanceof Error ? error.message : "Не удалось показать медиа");
+          setMediaUrl("");
+        }
+      }
+    }
+
+    void resolveMedia();
+    return () => {
+      active = false;
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [chatId, mediaPayload?.file_mime, mediaPayload?.file_nonce, mediaPayload?.media_url, token]);
+
   if (!mediaPayload) {
     return <p>{raw || "..."}</p>;
   }
+
+  const isImage = mediaPayload.file_mime.startsWith("image/");
+  const isVideo = mediaPayload.file_mime.startsWith("video/");
+
   return (
-    <p>
-      Файл: {mediaPayload.file_name} ({formatBytes(mediaPayload.file_size)}){" "}
-      <button className="inline-action" onClick={() => onDownload(mediaPayload.media_url, `${mediaPayload.file_name}.enc`)} type="button">
-        Скачать
-      </button>
-    </p>
+    <div className="media-message">
+      {mediaError ? <p>{mediaError}</p> : null}
+      {!mediaError && !mediaUrl ? <p>Загружаем медиа...</p> : null}
+      {mediaUrl && isImage ? <img alt={mediaPayload.file_name} className="media-inline-preview" src={mediaUrl} /> : null}
+      {mediaUrl && isVideo ? <video className="media-inline-preview" controls src={mediaUrl} /> : null}
+      <p>
+        Файл: {mediaPayload.file_name} ({formatBytes(mediaPayload.file_size)})
+      </p>
+      {mediaUrl ? (
+        <button className="inline-action" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} type="button">
+          Открыть
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -1171,15 +1386,15 @@ function normalizeStatus(status: string | null | undefined): "online" | "offline
 function humanizeStatus(status: string | null | undefined): string {
   const value = normalizeStatus(status);
   if (value === "online") {
-    return "в сети";
+    return "РІ СЃРµС‚Рё";
   }
   if (value === "dnd") {
-    return "не беспокоить";
+    return "РЅРµ Р±РµСЃРїРѕРєРѕРёС‚СЊ";
   }
   if (value === "away") {
-    return "отошел";
+    return "РѕС‚РѕС€РµР»";
   }
-  return "не в сети";
+  return "РЅРµ РІ СЃРµС‚Рё";
 }
 
 function formatBytes(value: number): string {
@@ -1194,6 +1409,14 @@ function formatBytes(value: number): string {
     return `${kb.toFixed(1)} KB`;
   }
   return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function formatMessageTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 async function ensureChatKey(chatId: string): Promise<string> {
@@ -1211,3 +1434,5 @@ async function deriveDeterministicChatKey(chatId: string): Promise<string> {
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+
+

@@ -58,6 +58,12 @@ class MessageSendRequest(BaseModel):
     encrypted_message_keys: dict[str, str] = Field(default_factory=dict)
 
 
+class MessageUpdateRequest(BaseModel):
+    ciphertext: str = Field(min_length=1)
+    nonce: str = Field(min_length=1, max_length=128)
+    message_type: str = Field(default="text", min_length=1, max_length=16)
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -472,6 +472,12 @@ button:disabled {
   display: grid;
   gap: 10px;
   margin-bottom: 14px;
+  scrollbar-width: none;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .chat-band.direct-full-height .chat-list-pane,
@@ -562,7 +568,9 @@ button:disabled {
 }
 
 .chat-settings {
+  position: relative;
   margin-bottom: 14px;
+  z-index: 20;
 }
 
 .chat-settings-toggle {
@@ -587,15 +595,23 @@ button:disabled {
 }
 
 .chat-settings-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
   max-height: 0;
   overflow: hidden;
+  border-radius: 14px;
+  background: #4b1220;
   opacity: 0;
   transform: translateY(-4px);
   transition: max-height 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
 }
 
 .chat-settings-panel.open {
-  max-height: 460px;
+  max-height: min(420px, 48vh);
+  overflow: auto;
+  padding: 8px;
   opacity: 1;
   transform: translateY(0);
 }
@@ -619,6 +635,105 @@ button:disabled {
   margin: 0;
   color: #ffe5c4;
   overflow-wrap: anywhere;
+}
+
+.message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.message-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #ffe5c4;
+  color: #3d0d18;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+}
+
+.message-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-head time {
+  color: #e7a8ae;
+  font-size: 12px;
+}
+
+.message-context-menu {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  gap: 6px;
+  min-width: 170px;
+  padding: 8px;
+  border-radius: 14px;
+  background: #3d0d18;
+  box-shadow: 0 16px 30px rgb(0 0 0 / 22%);
+}
+
+.message-context-menu button {
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: #ffe5c4;
+  background: #551625;
+  text-align: left;
+  cursor: pointer;
+}
+
+.message-context-menu button:hover {
+  background: #6a2133;
+}
+
+.media-message {
+  display: grid;
+  gap: 10px;
+}
+
+.media-inline-preview {
+  max-width: min(360px, 100%);
+  max-height: 280px;
+  border-radius: 12px;
+  background: #12070b;
+}
+
+.media-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  background: rgb(18 7 11 / 72%);
+}
+
+.media-preview-dialog {
+  width: min(88vw, 980px);
+  max-height: 88vh;
+  padding: 14px;
+  border-radius: 16px;
+  background: #3d0d18;
+}
+
+.media-preview-view {
+  width: 100%;
+  max-height: calc(88vh - 28px);
+  object-fit: contain;
 }
 
 .friend {

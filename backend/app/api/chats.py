@@ -16,10 +16,12 @@ from app.schemas.chat import (
     GroupChatCreate,
     MessageResponse,
     MessageSendRequest,
+    MessageUpdateRequest,
 )
 from app.services.chat_service import (
     ChatNotFound,
     ForbiddenChatAction,
+    MessageNotFound,
     NotChatMember,
     NotFriends,
     UserNotFound,
@@ -30,6 +32,8 @@ from app.services.chat_service import (
     get_chat,
     list_chats as list_user_chats,
     list_messages,
+    update_message,
+    delete_message,
     remove_group_member,
     send_message,
     update_group_member_role,
@@ -90,6 +94,69 @@ async def add_member(
         return await add_group_member(db, current_user, chat_id, payload.username, payload.encrypted_group_key)
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Chat not found") from exc
+
+
+@router.patch("/{chat_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_message(
+    chat_id: str,
+    message_id: str,
+    payload: MessageUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Message:
+    try:
+        message = await update_message(
+            db,
+            current_user,
+            chat_id,
+            message_id,
+            payload.ciphertext,
+            payload.nonce,
+            payload.message_type,
+        )
+        member_ids = await get_active_member_ids(db, chat_id)
+        message_payload = MessageResponse.model_validate(message).model_dump(mode="json")
+        await connection_manager.broadcast_to_users(
+            member_ids,
+            {
+                "type": "message.updated",
+                "chat_id": chat_id,
+                "message": message_payload,
+            },
+        )
+        return message
+    except NotChatMember as exc:
+        raise HTTPException(status_code=404, detail="Chat not found") from exc
+    except MessageNotFound as exc:
+        raise HTTPException(status_code=404, detail="Message not found") from exc
+    except ForbiddenChatAction as exc:
+        raise HTTPException(status_code=403, detail="Not enough permissions") from exc
+
+
+@router.delete("/{chat_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_message(
+    chat_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    try:
+        await delete_message(db, current_user, chat_id, message_id)
+        member_ids = await get_active_member_ids(db, chat_id)
+        await connection_manager.broadcast_to_users(
+            member_ids,
+            {
+                "type": "message.deleted",
+                "chat_id": chat_id,
+                "message_id": message_id,
+            },
+        )
+    except NotChatMember as exc:
+        raise HTTPException(status_code=404, detail="Chat not found") from exc
+    except MessageNotFound as exc:
+        raise HTTPException(status_code=404, detail="Message not found") from exc
+    except ForbiddenChatAction as exc:
+        raise HTTPException(status_code=403, detail="Not enough permissions") from exc
     except ChatNotFound as exc:
         raise HTTPException(status_code=404, detail="Group chat not found") from exc
     except UserNotFound as exc:

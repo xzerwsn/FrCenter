@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 import type { UserPublic } from "./users";
 
 export type ChatMember = {
@@ -89,7 +89,7 @@ export async function updateGroupMemberRole(
   chatId: string,
   payload: UpdateGroupMemberRolePayload,
 ): Promise<Chat> {
-  return apiPost<Chat>(
+  return apiPatch<Chat>(
     `/api/chats/${chatId}/members/role`,
     {
       user_id: payload.user_id,
@@ -131,4 +131,25 @@ export async function sendChatMessage(
     },
     { token },
   );
+}
+
+export async function updateChatMessage(
+  token: string,
+  chatId: string,
+  messageId: string,
+  payload: SendMessagePayload,
+): Promise<Message> {
+  return apiPatch<Message>(
+    `/api/chats/${chatId}/messages/${messageId}`,
+    {
+      ciphertext: payload.ciphertext,
+      nonce: payload.nonce,
+      message_type: payload.message_type,
+    },
+    { token },
+  );
+}
+
+export async function deleteChatMessage(token: string, chatId: string, messageId: string): Promise<void> {
+  await apiDelete<void>(`/api/chats/${chatId}/messages/${messageId}`, {}, { token });
 }
