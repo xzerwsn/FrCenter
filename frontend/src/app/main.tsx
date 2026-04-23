@@ -57,6 +57,7 @@ const CHAT_KEY_PREFIX = "frcenter.chatKey.";
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const THEME_STORAGE_KEY = "frcenter.siteTheme";
+const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 
 type SiteTheme = {
   id: string;
@@ -77,6 +78,15 @@ const SITE_THEMES: SiteTheme[] = [
     text: "#3A3534",
     accent: "#724B39",
     secondaryAccent: "#CF9D7B",
+  },
+  {
+    id: "night-sky-palette",
+    name: "Ночное небо (Palette)",
+    background: "#252330",
+    surface: "#3B3A4A",
+    text: "#F5F9F8",
+    accent: "#575669",
+    secondaryAccent: "#595168",
   },
   {
     id: "ocean",
@@ -396,12 +406,20 @@ function Dashboard({
   onThemeChange: (themeId: string) => void;
 }) {
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
-  const [section, setSection] = React.useState<DashboardSection>("home");
+  const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(null);
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
   }, [session.token]);
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem(DASHBOARD_SECTION_STORAGE_KEY, section);
+    } catch {
+      // ignore storage write errors
+    }
+  }, [section]);
 
   function openOwnProfile() {
     setSelectedProfile(session.user);
@@ -638,7 +656,6 @@ function SettingsPanel({
         </div>
       </div>
       <div>
-        <h2>Параметры</h2>
         <p className="form-status">1 цвет: фон сайта</p>
         <p className="form-status">2 цвет: карточки, хедер, футер</p>
         <p className="form-status">3 цвет: текст и иконки</p>
@@ -1268,7 +1285,7 @@ function ChatsPanel({
         await removeGroupMember(token, chat.id, me.id);
         setPinnedChatIds((current) => current.filter((item) => item !== chat.id));
         await reloadChats();
-        setStatus("Вы вышли из чата");
+        setStatus("");
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Не удалось выйти из чата");
       }
@@ -1277,7 +1294,34 @@ function ChatsPanel({
 
     setHiddenChatIds((current) => (current.includes(chat.id) ? current : [...current, chat.id]));
     setPinnedChatIds((current) => current.filter((item) => item !== chat.id));
-    setStatus("Чат скрыт");
+    setStatus("");
+  }
+
+  function handleChatPaneDragOver(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (!selectedChatId) {
+      return;
+    }
+    setComposerDragActive(true);
+  }
+
+  function handleChatPaneDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    const related = event.relatedTarget as Node | null;
+    if (!event.currentTarget.contains(related)) {
+      setComposerDragActive(false);
+    }
+  }
+
+  function handleChatPaneDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (!selectedChatId) {
+      return;
+    }
+    setComposerDragActive(false);
+    const droppedFile = event.dataTransfer.files?.[0] ?? null;
+    if (droppedFile) {
+      setAttachmentFile(droppedFile);
+    }
   }
 
   return (
@@ -1288,7 +1332,7 @@ function ChatsPanel({
           <button
             aria-label="Создать чат"
             className={`create-chat-fab ${createChatOpen ? "open" : ""}`}
-            onClick={() => setCreateChatOpen((open) => !open)}
+            onClick={() => setCreateChatOpen(true)}
             type="button"
           >
             <Pencil size={16} />
@@ -1296,80 +1340,104 @@ function ChatsPanel({
         </div>
 
         {createChatOpen ? (
-          <form className="create-chat-form" onSubmit={handleCreateChat}>
-            <div className="friend-select" ref={createParticipantsDropdownRef}>
-              <button
-                className="friend-select-trigger"
-                onClick={() => setCreateParticipantsDropdownOpen((open) => !open)}
-                type="button"
-              >
-                <span>{chatParticipants.length > 0 ? chatParticipants.join(", ") : "Выбери участников"}</span>
-                <ChevronDown size={16} />
-              </button>
-              <div className={`friend-select-dropdown ${createParticipantsDropdownOpen ? "open" : ""}`}>
-                {friends.map((friend) => (
+          <div
+            className="create-chat-modal-overlay"
+            onClick={() => {
+              setCreateChatOpen(false);
+              setCreateParticipantsDropdownOpen(false);
+            }}
+          >
+            <div className="create-chat-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="create-chat-modal-header">
+                <h3>Создать чат</h3>
+                <button
+                  aria-label="Закрыть"
+                  className="create-chat-modal-close"
+                  onClick={() => {
+                    setCreateChatOpen(false);
+                    setCreateParticipantsDropdownOpen(false);
+                  }}
+                  type="button"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <form className="create-chat-form" onSubmit={handleCreateChat}>
+                <div className="friend-select" ref={createParticipantsDropdownRef}>
                   <button
-                    className={`friend-select-item ${chatParticipants.includes(friend.username) ? "selected" : ""}`}
-                    key={friend.id}
-                    onClick={() => toggleParticipant(friend.username)}
+                    className="friend-select-trigger"
+                    onClick={() => setCreateParticipantsDropdownOpen((open) => !open)}
                     type="button"
                   >
-                    {friend.username}
+                    <span>{chatParticipants.length > 0 ? chatParticipants.join(", ") : "Выбери участников"}</span>
+                    <ChevronDown size={16} />
                   </button>
-                ))}
-              </div>
-            </div>
+                  <div className={`friend-select-dropdown ${createParticipantsDropdownOpen ? "open" : ""}`}>
+                    {friends.map((friend) => (
+                      <button
+                        className={`friend-select-item ${chatParticipants.includes(friend.username) ? "selected" : ""}`}
+                        key={friend.id}
+                        onClick={() => toggleParticipant(friend.username)}
+                        type="button"
+                      >
+                        {friend.username}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <input
-              className="compact-input"
-              maxLength={120}
-              onChange={(event) => setCreateChatTitle(event.target.value)}
-              placeholder="Название группы"
-              value={createChatTitle}
-            />
+                <input
+                  className="compact-input"
+                  maxLength={120}
+                  onChange={(event) => setCreateChatTitle(event.target.value)}
+                  placeholder="Название группы"
+                  value={createChatTitle}
+                />
 
-            <div className="create-chat-media">
-              <button onClick={() => avatarInputRef.current?.click()} type="button">
-                Аватар чата
-              </button>
-              <button onClick={() => backgroundInputRef.current?.click()} type="button">
-                Фон чата (необязательно)
-              </button>
-              <input
-                accept="image/*"
-                className="visually-hidden"
-                onChange={(event) => void handleCreateAvatarChange(event.target.files?.[0] ?? null)}
-                ref={avatarInputRef}
-                type="file"
-              />
-              <input
-                accept="image/*"
-                className="visually-hidden"
-                onChange={(event) => void handleCreateBackgroundChange(event.target.files?.[0] ?? null)}
-                ref={backgroundInputRef}
-                type="file"
-              />
-            </div>
+                <div className="create-chat-media">
+                  <button onClick={() => avatarInputRef.current?.click()} type="button">
+                    Аватар чата
+                  </button>
+                  <button onClick={() => backgroundInputRef.current?.click()} type="button">
+                    Фон чата (необязательно)
+                  </button>
+                  <input
+                    accept="image/*"
+                    className="visually-hidden"
+                    onChange={(event) => void handleCreateAvatarChange(event.target.files?.[0] ?? null)}
+                    ref={avatarInputRef}
+                    type="file"
+                  />
+                  <input
+                    accept="image/*"
+                    className="visually-hidden"
+                    onChange={(event) => void handleCreateBackgroundChange(event.target.files?.[0] ?? null)}
+                    ref={backgroundInputRef}
+                    type="file"
+                  />
+                </div>
 
-            {chatAvatarDataUrl || chatBackgroundDataUrl ? (
-              <div className="create-chat-previews">
-                {chatAvatarDataUrl ? (
-                  <div className="create-chat-preview-card">
-                    <span>Аватар</span>
-                    <img alt="Аватар чата" src={chatAvatarDataUrl} />
+                {chatAvatarDataUrl || chatBackgroundDataUrl ? (
+                  <div className="create-chat-previews">
+                    {chatAvatarDataUrl ? (
+                      <div className="create-chat-preview-card">
+                        <span>Аватар</span>
+                        <img alt="Аватар чата" src={chatAvatarDataUrl} />
+                      </div>
+                    ) : null}
+                    {chatBackgroundDataUrl ? (
+                      <div className="create-chat-preview-card">
+                        <span>Фон</span>
+                        <img alt="Фон чата" src={chatBackgroundDataUrl} />
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
-                {chatBackgroundDataUrl ? (
-                  <div className="create-chat-preview-card">
-                    <span>Фон</span>
-                    <img alt="Фон чата" src={chatBackgroundDataUrl} />
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
 
-            <button type="submit">Создать чат</button>
-          </form>
+                <button type="submit">Создать чат</button>
+              </form>
+            </div>
+          </div>
         ) : null}
 
         <div className="chat-list">
@@ -1416,7 +1484,13 @@ function ChatsPanel({
         </div>
       </div>
 
-      <div className="chat-pane" style={chatPaneStyle}>
+      <div
+        className={`chat-pane ${composerDragActive ? "drag-active" : ""}`}
+        onDragLeave={handleChatPaneDragLeave}
+        onDragOver={handleChatPaneDragOver}
+        onDrop={handleChatPaneDrop}
+        style={chatPaneStyle}
+      >
         {selectedChatMeta ? (
           <div className="chat-pane-header">
             <div className="chat-pane-avatar">
@@ -1556,39 +1630,7 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        <form
-          className={`composer-form ${composerDragActive ? "drag-active" : ""}`}
-          onDragLeave={(event) => {
-            const related = event.relatedTarget as Node | null;
-            if (!event.currentTarget.contains(related)) {
-              setComposerDragActive(false);
-            }
-          }}
-          onDragOver={(event) => {
-            event.preventDefault();
-            if (!selectedChatId) {
-              return;
-            }
-            setComposerDragActive(true);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            if (!selectedChatId) {
-              return;
-            }
-            setComposerDragActive(false);
-            const droppedFile = event.dataTransfer.files?.[0] ?? null;
-            if (droppedFile) {
-              setAttachmentFile(droppedFile);
-            }
-          }}
-          onSubmit={handleSendComposer}
-        >
-          <input
-            onChange={(event) => setMessageText(event.target.value)}
-            placeholder="Сообщение"
-            value={messageText}
-          />
+        <form className="composer-form" onSubmit={handleSendComposer}>
           <input
             accept="*/*"
             className="visually-hidden"
@@ -1605,6 +1647,11 @@ function ChatsPanel({
           >
             <Paperclip size={16} />
           </button>
+          <input
+            onChange={(event) => setMessageText(event.target.value)}
+            placeholder="Сообщение"
+            value={messageText}
+          />
           <button disabled={!selectedChatId || (!messageText.trim() && !attachmentFile)} type="submit">
             Отправить
           </button>
@@ -1781,6 +1828,32 @@ function loadStoredThemeId(): string {
   } catch {
     return fallback;
   }
+}
+
+function loadStoredDashboardSection(): DashboardSection {
+  const fallback: DashboardSection = "home";
+  try {
+    const saved = localStorage.getItem(DASHBOARD_SECTION_STORAGE_KEY);
+    if (!saved) {
+      return fallback;
+    }
+    return isDashboardSection(saved) ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function isDashboardSection(value: string): value is DashboardSection {
+  return (
+    value === "profile" ||
+    value === "home" ||
+    value === "chats" ||
+    value === "friends" ||
+    value === "notifications" ||
+    value === "games" ||
+    value === "clips" ||
+    value === "settings"
+  );
 }
 
 function applyTheme(theme: SiteTheme): void {

@@ -524,8 +524,7 @@ button:disabled {
 .create-chat-form {
   display: grid;
   gap: 10px;
-  margin-top: 8px;
-  margin-bottom: 12px;
+  margin: 0;
 }
 
 .create-chat-form button {
@@ -561,6 +560,54 @@ button:disabled {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.create-chat-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(6 7 11 / 66%);
+}
+
+.create-chat-modal {
+  width: min(540px, 100%);
+  max-height: min(84vh, 760px);
+  overflow: auto;
+  padding: 18px;
+  border-radius: 20px;
+  background: var(--color-surface);
+  box-shadow: 0 24px 52px rgb(0 0 0 / 34%);
+}
+
+.create-chat-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.create-chat-modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.create-chat-modal-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--color-text);
+  background: var(--color-input);
+  cursor: pointer;
+}
+
+.create-chat-modal-close:hover {
+  background: var(--color-accent-2);
 }
 
 .create-chat-preview-card {
@@ -708,6 +755,12 @@ button:disabled {
 
 .chat-pane-meta {
   min-width: 0;
+}
+
+.chat-pane.drag-active {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -8px;
+  background: color-mix(in srgb, var(--color-surface) 85%, var(--color-accent) 15%);
 }
 
 .message-list {
@@ -984,11 +1037,6 @@ button:disabled {
   border-radius: 16px;
   padding: 8px;
   background: var(--color-surface-strong);
-}
-
-.composer-form.drag-active {
-  border-color: var(--color-accent);
-  background: var(--color-input);
 }
 
 .composer-form input {
