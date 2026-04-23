@@ -121,7 +121,7 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       <section className="auth-panel">
         <div className="brand auth-brand">FC</div>
         <h1>FrCenter</h1>
-        <p>Р’С…РѕРґ РІ РёРіСЂРѕРІРѕР№ E2EE-С†РµРЅС‚СЂ РґР»СЏ РґСЂСѓР·РµР№, С‡Р°С‚РѕРІ Рё РЅРѕРІРѕСЃС‚РµР№.</p>
+        <p>Вход в игровой E2EE-центр для друзей, чатов и новостей.</p>
         {children}
       </section>
     </main>
@@ -142,13 +142,13 @@ function LoginForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Р’С…РѕРґРёРј...");
+    setStatus("Входим...");
     try {
       const response = await login(email, password);
       await onLogin(response.access_token, cloudPassword);
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕР№С‚Рё");
+      setStatus(error instanceof Error ? error.message : "Не удалось войти");
     }
   }
 
@@ -159,16 +159,16 @@ function LoginForm({
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
       </label>
       <label>
-        РџР°СЂРѕР»СЊ
+        Пароль
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
       </label>
       <label>
-        РћР±Р»Р°С‡РЅС‹Р№ РїР°СЂРѕР»СЊ
+        Облачный пароль
         <input value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} type="password" required />
       </label>
-      <button type="submit">Р’РѕР№С‚Рё</button>
+      <button type="submit">Войти</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        РЎРѕР·РґР°С‚СЊ Р°РєРєР°СѓРЅС‚
+        Создать аккаунт
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -190,7 +190,7 @@ function RegisterForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("РЎРѕР·РґР°РµРј Р°РєРєР°СѓРЅС‚...");
+    setStatus("Создаем аккаунт...");
     try {
       const response = await register({
         email,
@@ -200,7 +200,7 @@ function RegisterForm({
       });
       onRegistered(response.email, response.dev_confirmation_code ?? null);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ");
+      setStatus(error instanceof Error ? error.message : "Не удалось зарегистрироваться");
     }
   }
 
@@ -218,12 +218,12 @@ function RegisterForm({
           minLength={3}
           maxLength={32}
           pattern="[A-Za-z0-9_]+"
-          title="РўРѕР»СЊРєРѕ Р»Р°С‚РёРЅСЃРєРёРµ Р±СѓРєРІС‹, С†РёС„СЂС‹ Рё _ (3-32 СЃРёРјРІРѕР»Р°)"
+          title="Только латинские буквы, цифры и _ (3-32 символа)"
           required
         />
       </label>
       <label>
-        РџР°СЂРѕР»СЊ
+        Пароль
         <input
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -234,7 +234,7 @@ function RegisterForm({
         />
       </label>
       <label>
-        РћР±Р»Р°С‡РЅС‹Р№ РїР°СЂРѕР»СЊ
+        Облачный пароль
         <input
           value={cloudPassword}
           onChange={(event) => setCloudPassword(event.target.value)}
@@ -244,9 +244,9 @@ function RegisterForm({
           required
         />
       </label>
-      <button type="submit">Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊСЃСЏ</button>
+      <button type="submit">Зарегистрироваться</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        РЈР¶Рµ РµСЃС‚СЊ Р°РєРєР°СѓРЅС‚
+        Уже есть аккаунт
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -266,17 +266,17 @@ function ConfirmForm({
 }) {
   const [email, setEmail] = React.useState(defaultEmail);
   const [code, setCode] = React.useState(devCode ?? "");
-  const [status, setStatus] = React.useState(devCode ? `Dev-РєРѕРґ: ${devCode}` : "");
+  const [status, setStatus] = React.useState(devCode ? `Dev-код: ${devCode}` : "");
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("РџРѕРґС‚РІРµСЂР¶РґР°РµРј...");
+    setStatus("Подтверждаем...");
     try {
       await confirmEmail(email, code);
-      setStatus("Email РїРѕРґС‚РІРµСЂР¶РґРµРЅ, РјРѕР¶РЅРѕ РІРѕР№С‚Рё");
+      setStatus("Email подтвержден, можно войти");
       onConfirmed();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґС‚РІРµСЂРґРёС‚СЊ email");
+      setStatus(error instanceof Error ? error.message : "Не удалось подтвердить email");
     }
   }
 
@@ -287,12 +287,12 @@ function ConfirmForm({
         <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required />
       </label>
       <label>
-        РљРѕРґ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ
+        Код подтверждения
         <input value={code} onChange={(event) => setCode(event.target.value)} required />
       </label>
-      <button type="submit">РџРѕРґС‚РІРµСЂРґРёС‚СЊ</button>
+      <button type="submit">Подтвердить</button>
       <button className="link-button" onClick={onSwitch} type="button">
-        Р’РµСЂРЅСѓС‚СЊСЃСЏ РєРѕ РІС…РѕРґСѓ
+        Вернуться ко входу
       </button>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
@@ -328,38 +328,38 @@ function Dashboard({
     <main className="shell">
       <aside className="sidebar">
         <button
-          aria-label="РџСЂРѕС„РёР»СЊ"
+          aria-label="Профиль"
           className={`profile-button ${section === "profile" ? "active" : ""}`}
           onClick={openOwnProfile}
           type="button"
         >
           <div className="brand">{session.user.username.slice(0, 1).toUpperCase()}</div>
         </button>
-        <button aria-label="Р“Р»Р°РІРЅР°СЏ" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
+        <button aria-label="Главная" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
           <Home size={20} />
         </button>
-        <button aria-label="Р§Р°С‚С‹" className={section === "chats" ? "active" : ""} onClick={() => setSection("chats")} type="button">
+        <button aria-label="Чаты" className={section === "chats" ? "active" : ""} onClick={() => setSection("chats")} type="button">
           <MessageCircle size={20} />
         </button>
-        <button aria-label="Р”СЂСѓР·СЊСЏ" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
+        <button aria-label="Друзья" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
           <Users size={20} />
         </button>
         <button
-          aria-label="РЈРІРµРґРѕРјР»РµРЅРёСЏ"
+          aria-label="Уведомления"
           className={section === "notifications" ? "active" : ""}
           onClick={() => setSection("notifications")}
           type="button"
         >
           <Bell size={20} />
         </button>
-        <button aria-label="РРіСЂРѕРІР°СЏ Р·РѕРЅР°" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
+        <button aria-label="Игровая зона" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
           <Gamepad2 size={20} />
         </button>
-        <button aria-label="РљР»РёРїС‹" className={section === "clips" ? "active" : ""} onClick={() => setSection("clips")} type="button">
+        <button aria-label="Клипы" className={section === "clips" ? "active" : ""} onClick={() => setSection("clips")} type="button">
           <PlaySquare size={20} />
         </button>
         <button
-          aria-label="РќР°СЃС‚СЂРѕР№РєРё"
+          aria-label="Настройки"
           className={section === "settings" ? "active" : ""}
           onClick={() => setSection("settings")}
           type="button"
@@ -371,11 +371,11 @@ function Dashboard({
       <section className="content">
         <header className="topbar">
           <p>
-            Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ, <strong>{session.user.username.toUpperCase()}</strong>
+            Добро пожаловать, <strong>{session.user.username.toUpperCase()}</strong>
           </p>
           <div className="topbar-actions">
-            <input placeholder="РџРѕРёСЃРє" />
-            <button aria-label="Р’С‹Р№С‚Рё" onClick={onLogout} type="button">
+            <input placeholder="Поиск" />
+            <button aria-label="Выйти" onClick={onLogout} type="button">
               <LogOut size={18} />
             </button>
           </div>
@@ -406,22 +406,22 @@ function Dashboard({
 }
 
 function ProfilePanel({ profile }: { profile: UserPublic | CurrentUser }) {
-  const game = profile.current_game ?? "РќРµ РёРіСЂР°РµС‚";
+  const game = profile.current_game ?? "Не играет";
   const status = profile.status || "offline";
   return (
     <section className="tool-band">
       <div>
-        <h2>РџСЂРѕС„РёР»СЊ</h2>
+        <h2>Профиль</h2>
         <div className="result-row">
           <span>
-            <b>{profile.username}</b> В· {status}
+            <b>{profile.username}</b> · {status}
           </span>
           <UserRound size={18} />
         </div>
-        <p className="form-status">РўРµРєСѓС‰Р°СЏ РёРіСЂР°: {game}</p>
+        <p className="form-status">Текущая игра: {game}</p>
       </div>
       <div>
-        <h2>РћР±С‰РµРµ</h2>
+        <h2>Общее</h2>
         {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
         <p className="form-status">ID: {profile.id}</p>
       </div>
@@ -433,9 +433,9 @@ function HomePanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>Р“Р»Р°РІРЅР°СЏ</h2>
+        <h2>Главная</h2>
         <div className="result-list">
-          {friends.length === 0 ? <p className="form-status">РџРѕРєР° РЅРµС‚ РґСЂСѓР·РµР№</p> : null}
+          {friends.length === 0 ? <p className="form-status">Пока нет друзей</p> : null}
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
@@ -452,10 +452,10 @@ function NotificationsPanel() {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>РЈРІРµРґРѕРјР»РµРЅРёСЏ</h2>
+        <h2>Уведомления</h2>
         <div className="result-list">
           <div className="result-row">
-            <span>РќРѕРІС‹С… СѓРІРµРґРѕРјР»РµРЅРёР№ РїРѕРєР° РЅРµС‚</span>
+            <span>Новых уведомлений пока нет</span>
           </div>
         </div>
       </div>
@@ -467,27 +467,27 @@ function GamesPanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band">
       <div>
-        <h2>РРіСЂРѕРІР°СЏ Р·РѕРЅР°</h2>
-        <p className="form-status">Steam Рё Riot: РЅР°СЃС‚СЂРѕР№РєР° РёРЅС‚РµРіСЂР°С†РёР№ Р±СѓРґРµС‚ РІ СЌС‚РѕРј СЂР°Р·РґРµР»Рµ.</p>
+        <h2>Игровая зона</h2>
+        <p className="form-status">Steam и Riot: настройка интеграций будет в этом разделе.</p>
         <div className="result-list">
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
-              <span>{friend.current_game ?? "РќРµ РёРіСЂР°РµС‚"}</span>
+              <span>{friend.current_game ?? "Не играет"}</span>
             </div>
           ))}
         </div>
       </div>
       <div>
-        <h2>РРЅС‚РµРіСЂР°С†РёРё</h2>
+        <h2>Интеграции</h2>
         <div className="result-list">
           <div className="result-row">
             <span>Steam</span>
-            <button type="button">РџРѕРґРєР»СЋС‡РёС‚СЊ</button>
+            <button type="button">Подключить</button>
           </div>
           <div className="result-row">
             <span>Riot Games</span>
-            <button type="button">РџРѕРґРєР»СЋС‡РёС‚СЊ</button>
+            <button type="button">Подключить</button>
           </div>
         </div>
       </div>
@@ -499,13 +499,13 @@ function ClipsPanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band single-column">
       <div>
-        <h2>РљР»РёРїС‹</h2>
-        <p className="form-status">РњРµРґРёР°-РїРѕСЃС‚С‹ РґСЂСѓР·РµР№ (РІРёРґРµРѕ/С„РѕС‚Рѕ) Р±СѓРґСѓС‚ РѕС‚РѕР±СЂР°Р¶Р°С‚СЊСЃСЏ Р·РґРµСЃСЊ.</p>
+        <h2>Клипы</h2>
+        <p className="form-status">Медиа-посты друзей (видео/фото) будут отображаться здесь.</p>
         <div className="result-list">
           {friends.slice(0, 6).map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
-              <span>РџСѓР±Р»РёРєР°С†РёР№: 0</span>
+              <span>Публикаций: 0</span>
             </div>
           ))}
         </div>
@@ -524,26 +524,26 @@ function SettingsPanel({
   return (
     <section className="tool-band">
       <div>
-        <h2>РќР°СЃС‚СЂРѕР№РєРё</h2>
+        <h2>Настройки</h2>
         <div className="result-list">
           <label className="result-row">
-            <span>РўРµРјРЅР°СЏ С‚РµРјР°</span>
+            <span>Темная тема</span>
             <input checked={darkTheme} onChange={() => setDarkTheme((v) => !v)} type="checkbox" />
           </label>
           <label className="result-row">
-            <span>Р—Р°РїСѓСЃРє РІРјРµСЃС‚Рµ СЃ Windows</span>
+            <span>Запуск вместе с Windows</span>
             <input checked={autoStart} onChange={() => setAutoStart((v) => !v)} type="checkbox" />
           </label>
           <label className="result-row">
-            <span>РЈРІРµРґРѕРјР»РµРЅРёСЏ</span>
+            <span>Уведомления</span>
             <input checked={notifEnabled} onChange={() => setNotifEnabled((v) => !v)} type="checkbox" />
           </label>
         </div>
       </div>
       <div>
-        <h2>Р‘РµР·РѕРїР°СЃРЅРѕСЃС‚СЊ</h2>
-        <p className="form-status">РЎРєРІРѕР·РЅРѕРµ С€РёС„СЂРѕРІР°РЅРёРµ СЂР°Р±РѕС‚Р°РµС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.</p>
-        <p className="form-status">РљР»СЋС‡Рё СЃРѕР·РґР°СЋС‚СЃСЏ Рё РѕР±РЅРѕРІР»СЏСЋС‚СЃСЏ Р±РµР· СЂСѓС‡РЅС‹С… РґРµР№СЃС‚РІРёР№ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ.</p>
+        <h2>Безопасность</h2>
+        <p className="form-status">Сквозное шифрование работает автоматически.</p>
+        <p className="form-status">Ключи создаются и обновляются без ручных действий пользователя.</p>
       </div>
     </section>
   );
@@ -578,35 +578,35 @@ function FriendsPanel({
 
   async function handleSearch(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("РС‰РµРј...");
+    setStatus("Ищем...");
     try {
       const results = await searchUsers(token, query);
       setSearchResults(results);
-      setStatus(results.length ? "" : "РќРёРєРѕРіРѕ РЅРµ РЅР°С€Р»Рё");
+      setStatus(results.length ? "" : "Никого не нашли");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РЅР°Р№С‚Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ");
+      setStatus(error instanceof Error ? error.message : "Не удалось найти пользователя");
     }
   }
 
   async function handleRequest(username: string) {
-    setStatus("РћС‚РїСЂР°РІР»СЏРµРј Р·Р°СЏРІРєСѓ...");
+    setStatus("Отправляем заявку...");
     try {
       await sendFriendRequest(token, username);
-      setStatus("Р—Р°СЏРІРєР° РѕС‚РїСЂР°РІР»РµРЅР°");
+      setStatus("Заявка отправлена");
       await refreshFriends();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р·Р°СЏРІРєСѓ");
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить заявку");
     }
   }
 
   async function handleCreateInvite() {
-    setStatus("РЎРѕР·РґР°РµРј invite-РєРѕРґ...");
+    setStatus("Создаем invite-код...");
     try {
       const response = await createInviteCode(token);
       setInviteCode(response.code);
-      setStatus("Invite-РєРѕРґ РіРѕС‚РѕРІ");
+      setStatus("Invite-код готов");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ invite-РєРѕРґ");
+      setStatus(error instanceof Error ? error.message : "Не удалось создать invite-код");
     }
   }
 
@@ -625,39 +625,39 @@ function FriendsPanel({
     }
     try {
       await navigator.clipboard.writeText(inviteCode);
-      setStatus("РљРѕРґ СЃРєРѕРїРёСЂРѕРІР°РЅ");
+      setStatus("Код скопирован");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ РєРѕРґ");
+      setStatus(error instanceof Error ? error.message : "Не удалось скопировать код");
     }
   }
 
   async function handleAddByCode(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("Р”РѕР±Р°РІР»СЏРµРј РґСЂСѓРіР°...");
+    setStatus("Добавляем друга...");
     try {
       await addFriendByCode(token, joinCode);
       setJoinCode("");
       await refreshFriends();
-      setStatus("Р”СЂСѓРі РґРѕР±Р°РІР»РµРЅ");
+      setStatus("Друг добавлен");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ РїРѕ РєРѕРґСѓ");
+      setStatus(error instanceof Error ? error.message : "Не удалось добавить по коду");
     }
   }
 
   return (
     <section className="tool-band">
       <div>
-        <h2>Р”СЂСѓР·СЊСЏ</h2>
+        <h2>Друзья</h2>
         <form className="inline-form" onSubmit={handleSearch}>
           <input placeholder="Username" value={query} onChange={(event) => setQuery(event.target.value)} required />
-          <button type="submit">РќР°Р№С‚Рё</button>
+          <button type="submit">Найти</button>
         </form>
         <div className="result-list">
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
               <span>{friend.username}</span>
               <button onClick={() => onOpenProfile(friend)} type="button">
-                РџСЂРѕС„РёР»СЊ
+                Профиль
               </button>
             </div>
           ))}
@@ -667,7 +667,7 @@ function FriendsPanel({
             <div className="result-row" key={user.id}>
               <span>{user.username}</span>
               <button onClick={() => handleRequest(user.username)} type="button">
-                Р—Р°СЏРІРєР°
+                Заявка
               </button>
             </div>
           ))}
@@ -677,19 +677,19 @@ function FriendsPanel({
       <div>
         <h2>Invite</h2>
         <button className="inline-action" onClick={handleCreateInvite} type="button">
-          РЎРѕР·РґР°С‚СЊ РєРѕРґ
+          Создать код
         </button>
         {inviteCode ? (
           <div className="invite-code-row">
             <small className="invite-code">{inviteCode}</small>
             <button className="inline-action" onClick={handleCopyInviteCode} type="button">
-              РЎРєРѕРїРёСЂРѕРІР°С‚СЊ
+              Скопировать
             </button>
           </div>
         ) : null}
         <form className="inline-form stacked" onSubmit={handleAddByCode}>
-          <input placeholder="РљРѕРґ РґСЂСѓРіР°" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
-          <button type="submit">Р”РѕР±Р°РІРёС‚СЊ</button>
+          <input placeholder="Код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
+          <button type="submit">Добавить</button>
         </form>
       </div>
       {status ? <p className="form-status">{status}</p> : null}
@@ -860,13 +860,13 @@ function ChatsPanel({
       return;
     }
     const currentText = decodeMap[message.id] ?? "";
-    const nextText = window.prompt("РќРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ", currentText);
+    const nextText = window.prompt("Новое сообщение", currentText);
     if (nextText === null) {
       return;
     }
     const trimmed = nextText.trim();
     if (!trimmed) {
-      setStatus("РўРµРєСЃС‚ СЃРѕРѕР±С‰РµРЅРёСЏ РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїСѓСЃС‚С‹Рј");
+      setStatus("Текст сообщения не может быть пустым");
       return;
     }
     try {
@@ -879,7 +879,7 @@ function ChatsPanel({
       });
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚СЂРµРґР°РєС‚РёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
+      setStatus(error instanceof Error ? error.message : "Не удалось отредактировать сообщение");
     }
   }
 
@@ -887,24 +887,24 @@ function ChatsPanel({
     if (!selectedChatId || !canManageMessage(message)) {
       return;
     }
-    if (!window.confirm("РЈРґР°Р»РёС‚СЊ СЌС‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ?")) {
+    if (!window.confirm("Удалить это сообщение?")) {
       return;
     }
     try {
       await deleteChatMessage(token, selectedChatId, message.id);
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
+      setStatus(error instanceof Error ? error.message : "Не удалось удалить сообщение");
     }
   }
 
   async function handleCreateDirect(event: React.FormEvent) {
     event.preventDefault();
     if (!directUsername.trim()) {
-      setStatus("Р’С‹Р±РµСЂРё РґСЂСѓРіР°");
+      setStatus("Выбери друга");
       return;
     }
-    setStatus("РЎРѕР·РґР°РµРј direct-С‡Р°С‚...");
+    setStatus("Создаем direct-чат...");
     try {
       const chat = await createDirectChat(token, directUsername.trim());
       setDirectUsername("");
@@ -912,19 +912,19 @@ function ChatsPanel({
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
-      setStatus("Direct-С‡Р°С‚ РіРѕС‚РѕРІ");
+      setStatus("Direct-чат готов");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ С‡Р°С‚");
+      setStatus(error instanceof Error ? error.message : "Не удалось создать чат");
     }
   }
 
   async function handleCreateGroup(event: React.FormEvent) {
     event.preventDefault();
-    setStatus("РЎРѕР·РґР°РµРј РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚...");
+    setStatus("Создаем групповой чат...");
     try {
       const usernames = Array.from(new Set(groupUsernames.map((item) => item.trim()).filter((item) => item.length > 0)));
       if (usernames.length === 0) {
-        setStatus("Р’С‹Р±РµСЂРё С…РѕС‚СЏ Р±С‹ РѕРґРЅРѕРіРѕ РґСЂСѓРіР°");
+        setStatus("Выбери хотя бы одного друга");
         return;
       }
       const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames });
@@ -934,9 +934,9 @@ function ChatsPanel({
       await ensureChatKey(chat.id);
       await reloadChats();
       setSelectedChatId(chat.id);
-      setStatus("Р“СЂСѓРїРїРѕРІРѕР№ С‡Р°С‚ РіРѕС‚РѕРІ");
+      setStatus("Групповой чат готов");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚");
+      setStatus(error instanceof Error ? error.message : "Не удалось создать групповой чат");
     }
   }
 
@@ -945,16 +945,16 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("Р”РѕР±Р°РІР»СЏРµРј СѓС‡Р°СЃС‚РЅРёРєР°...");
+    setStatus("Добавляем участника...");
     try {
       const rotatedKey = await createSharedMessageKey();
       await addGroupMember(token, selectedChatId, memberUsername.trim(), rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       setMemberUsername("");
       await reloadChats();
-      setStatus("РЈС‡Р°СЃС‚РЅРёРє РґРѕР±Р°РІР»РµРЅ");
+      setStatus("Участник добавлен");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РґРѕР±Р°РІРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР°");
+      setStatus(error instanceof Error ? error.message : "Не удалось добавить участника");
     }
   }
 
@@ -962,13 +962,13 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("РћР±РЅРѕРІР»СЏРµРј СЂРѕР»СЊ...");
+    setStatus("Обновляем роль...");
     try {
       await updateGroupMemberRole(token, selectedChatId, { user_id: userId, role });
       await reloadChats();
-      setStatus("Р РѕР»СЊ РѕР±РЅРѕРІР»РµРЅР°");
+      setStatus("Роль обновлена");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±РЅРѕРІРёС‚СЊ СЂРѕР»СЊ");
+      setStatus(error instanceof Error ? error.message : "Не удалось обновить роль");
     }
   }
 
@@ -976,15 +976,15 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("РЈРґР°Р»СЏРµРј СѓС‡Р°СЃС‚РЅРёРєР°...");
+    setStatus("Удаляем участника...");
     try {
       const rotatedKey = await createSharedMessageKey();
       await removeGroupMember(token, selectedChatId, userId, rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       await reloadChats();
-      setStatus("РЈС‡Р°СЃС‚РЅРёРє СѓРґР°Р»РµРЅ");
+      setStatus("Участник удален");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ СѓРґР°Р»РёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєР°");
+      setStatus(error instanceof Error ? error.message : "Не удалось удалить участника");
     }
   }
 
@@ -993,7 +993,7 @@ function ChatsPanel({
     if (!selectedChatId) {
       return;
     }
-    setStatus("РћС‚РїСЂР°РІР»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ...");
+    setStatus("Отправляем сообщение...");
     try {
       const key = await ensureChatKey(selectedChatId);
       const encrypted = await encryptTextForSharedKey(messageText, key);
@@ -1005,7 +1005,7 @@ function ChatsPanel({
       setMessageText("");
       setStatus("");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ");
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
     }
   }
 
@@ -1014,7 +1014,7 @@ function ChatsPanel({
     if (!selectedChatId || !attachmentFile) {
       return;
     }
-    setStatus("РЁРёС„СЂСѓРµРј Рё РѕС‚РїСЂР°РІР»СЏРµРј РІР»РѕР¶РµРЅРёРµ...");
+    setStatus("Шифруем и отправляем вложение...");
     try {
       const chatKey = await ensureChatKey(selectedChatId);
       const fileBytes = new Uint8Array(await attachmentFile.arrayBuffer());
@@ -1042,20 +1042,20 @@ function ChatsPanel({
         message_type: "media",
       });
       setAttachmentFile(null);
-      setStatus("Р’Р»РѕР¶РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ");
+      setStatus("Вложение отправлено");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РІР»РѕР¶РµРЅРёРµ");
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить вложение");
     }
   }
 
   return (
     <section className={`chat-band ${selectedChat?.type === "direct" ? "direct-full-height" : ""}`}>
       <div className="chat-list-pane">
-        <h2>Р§Р°С‚С‹</h2>
+        <h2>Чаты</h2>
         <form className="inline-form" onSubmit={handleCreateDirect}>
           <div className="friend-select" ref={directDropdownRef}>
             <button className="friend-select-trigger" onClick={() => setDirectDropdownOpen((open) => !open)} type="button">
-              <span>{directUsername || "Username РґСЂСѓРіР°"}</span>
+              <span>{directUsername || "Username друга"}</span>
               <ChevronDown size={16} />
             </button>
             <div className={`friend-select-dropdown ${directDropdownOpen ? "open" : ""}`}>
@@ -1077,10 +1077,10 @@ function ChatsPanel({
           <button type="submit">Direct</button>
         </form>
         <form className="inline-form stacked" onSubmit={handleCreateGroup}>
-          <input placeholder="РќР°Р·РІР°РЅРёРµ РіСЂСѓРїРїС‹" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
+          <input placeholder="Название группы" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
           <div className="friend-select" ref={groupDropdownRef}>
             <button className="friend-select-trigger" onClick={() => setGroupDropdownOpen((open) => !open)} type="button">
-              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username РґСЂСѓРіР°"}</span>
+              <span>{groupUsernames.length > 0 ? groupUsernames.join(", ") : "Username друга"}</span>
               <ChevronDown size={16} />
             </button>
             <div className={`friend-select-dropdown ${groupDropdownOpen ? "open" : ""}`}>
@@ -1092,40 +1092,40 @@ function ChatsPanel({
               ))}
             </div>
           </div>
-          <button type="submit">РЎРѕР·РґР°С‚СЊ РіСЂСѓРїРїСѓ</button>
+          <button type="submit">Создать группу</button>
         </form>
         <div className="chat-list">
           {chats.map((chat) => (
             <button className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id} onClick={() => setSelectedChatId(chat.id)} type="button">
-              <strong>{chat.type === "group" ? chat.title ?? "Р“СЂСѓРїРїР°" : "Direct chat"}</strong>
-              <span>{chat.members.length} СѓС‡Р°СЃС‚РЅРёРєР°</span>
+              <strong>{chat.type === "group" ? chat.title ?? "Группа" : "Direct chat"}</strong>
+              <span>{chat.members.length} участника</span>
             </button>
           ))}
         </div>
       </div>
 
       <div className="chat-pane">
-        <h2>РЎРѕРѕР±С‰РµРЅРёСЏ</h2>
+        <h2>Сообщения</h2>
         {selectedChat?.type === "group" ? (
           <div className="chat-settings">
             <button className="chat-settings-toggle" onClick={() => setGroupSettingsOpen((open) => !open)} type="button">
-              РќР°СЃС‚СЂРѕР№РєРё С‡Р°С‚Р°
+              Настройки чата
               <ChevronDown className={groupSettingsOpen ? "rotated" : ""} size={16} />
             </button>
             <div className={`chat-settings-panel ${groupSettingsOpen ? "open" : ""}`}>
               <div className="result-list">
-                <p className="form-status">РњРѕСЏ СЂРѕР»СЊ: {myMember?.role ?? "member"}</p>
+                <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
                 {canManageMembers ? (
                   <form className="inline-form" onSubmit={handleAddMember}>
                     <input
-                      placeholder="Username СѓС‡Р°СЃС‚РЅРёРєР°"
+                      placeholder="Username участника"
                       value={memberUsername}
                       onChange={(event) => setMemberUsername(event.target.value)}
                       minLength={3}
                       maxLength={32}
                       required
                     />
-                    <button type="submit">Р”РѕР±Р°РІРёС‚СЊ</button>
+                    <button type="submit">Добавить</button>
                   </form>
                 ) : null}
                 {selectedChat.members.map((member) => (
@@ -1135,12 +1135,12 @@ function ChatsPanel({
                     </span>
                     {canManageRoles && member.role !== "owner" ? (
                       <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
-                        {member.role === "admin" ? "РЎРЅСЏС‚СЊ admin" : "РЎРґРµР»Р°С‚СЊ admin"}
+                        {member.role === "admin" ? "Снять admin" : "Сделать admin"}
                       </button>
                     ) : null}
                     {canManageMembers && member.role !== "owner" ? (
                       <button onClick={() => handleRemoveMember(member.user.id)} type="button">
-                        РЈРґР°Р»РёС‚СЊ
+                        Удалить
                       </button>
                     ) : null}
                   </div>
@@ -1210,7 +1210,7 @@ function ChatsPanel({
                 }}
                 type="button"
               >
-                Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ
+                Редактировать
               </button>
             ) : null}
             <button
@@ -1220,21 +1220,21 @@ function ChatsPanel({
               }}
               type="button"
             >
-              РЈРґР°Р»РёС‚СЊ
+              Удалить
             </button>
           </div>
         ) : null}
 
         <form className="inline-form" onSubmit={handleSendMessage}>
-          <input placeholder="РЎРѕРѕР±С‰РµРЅРёРµ" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
+          <input placeholder="Сообщение" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
           <button disabled={!selectedChatId} type="submit">
-            РћС‚РїСЂР°РІРёС‚СЊ
+            Отправить
           </button>
         </form>
         <form className="inline-form" onSubmit={handleSendAttachment}>
           <input accept="*/*" onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)} type="file" />
           <button disabled={!selectedChatId || !attachmentFile} type="submit">
-            РћС‚РїСЂР°РІРёС‚СЊ С„Р°Р№Р»
+            Отправить файл
           </button>
         </form>
         {status ? <p className="form-status">{status}</p> : null}
@@ -1252,7 +1252,7 @@ function ChatsPanel({
               {previewMediaType.startsWith("video/") ? (
                 <video className="media-preview-view" controls src={previewMediaUrl} />
               ) : previewMediaType.startsWith("image/") ? (
-                <img alt="РњРµРґРёР°" className="media-preview-view" src={previewMediaUrl} />
+                <img alt="Медиа" className="media-preview-view" src={previewMediaUrl} />
               ) : (
                 <a className="inline-action" href={previewMediaUrl} rel="noreferrer" target="_blank">
                   Открыть файл в новой вкладке
@@ -1397,15 +1397,15 @@ function normalizeStatus(status: string | null | undefined): "online" | "offline
 function humanizeStatus(status: string | null | undefined): string {
   const value = normalizeStatus(status);
   if (value === "online") {
-    return "РІ СЃРµС‚Рё";
+    return "в сети";
   }
   if (value === "dnd") {
-    return "РЅРµ Р±РµСЃРїРѕРєРѕРёС‚СЊ";
+    return "не беспокоить";
   }
   if (value === "away") {
-    return "РѕС‚РѕС€РµР»";
+    return "отошел";
   }
-  return "РЅРµ РІ СЃРµС‚Рё";
+  return "не в сети";
 }
 
 function formatBytes(value: number): string {
