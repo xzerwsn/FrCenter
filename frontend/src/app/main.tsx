@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { Gamepad2, Home, LogOut, MessageCircle, Newspaper, Settings, Users } from "lucide-react";
 
 import { confirmEmail, login, register } from "../api/auth";
+import { type Chat, type Message, createDirectChat, listChatMessages, listChats, sendChatMessage } from "../api/chats";
 import { registerDevice } from "../api/devices";
 import {
   addFriendByCode,
@@ -11,13 +12,16 @@ import {
   searchUsers,
   sendFriendRequest,
 } from "../api/friends";
-import { getMe, type CurrentUser } from "../api/users";
-import type { UserPublic } from "../api/users";
+import { connectRealtime, type RealtimeEvent } from "../api/realtime";
+import { getMe, type CurrentUser, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
+import { createSharedMessageKey, decryptTextWithSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
 
 type AuthMode = "login" | "register" | "confirm";
+
+const CHAT_KEY_PREFIX = "frcenter.chatKey.";
 
 function App() {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
@@ -345,7 +349,9 @@ function Dashboard({
             </button>
           </article>
         </section>
+
         <FriendsPanel token={session.token} onFriendsChanged={setFriends} />
+        <ChatsPanel token={session.token} me={session.user} friends={friends} />
       </section>
 
       <aside className="friends">
@@ -468,6 +474,194 @@ function FriendsPanel({
       {status ? <p className="form-status">{status}</p> : null}
     </section>
   );
+}
+
+function ChatsPanel({
+  token,
+  me,
+  friends,
+}: {
+  token: string;
+  me: CurrentUser;
+  friends: UserPublic[];
+}) {
+  const [chats, setChats] = React.useState<Chat[]>([]);
+  const [selectedChatId, setSelectedChatId] = React.useState<string>("");
+  const [messages, setMessages] = React.useState<Message[]>([]);
+  const [messageText, setMessageText] = React.useState("");
+  const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
+  const [directUsername, setDirectUsername] = React.useState("");
+  const [status, setStatus] = React.useState("");
+
+  React.useEffect(() => {
+    void reloadChats();
+  }, [token]);
+
+  React.useEffect(() => {
+    if (!selectedChatId) {
+      setMessages([]);
+      return;
+    }
+    void listChatMessages(token, selectedChatId).then(setMessages);
+  }, [selectedChatId, token]);
+
+  React.useEffect(() => {
+    const socket = connectRealtime(token, (event: RealtimeEvent) => {
+      if (event.type !== "message.new") {
+        return;
+      }
+      const incoming = event.message as Message;
+      if (incoming.chat_id === selectedChatId) {
+        setMessages((previous) => [...previous, incoming]);
+      }
+      void reloadChats();
+    });
+
+    return () => {
+      socket.close();
+    };
+  }, [selectedChatId, token]);
+
+  React.useEffect(() => {
+    void decodeMessages(messages);
+  }, [messages]);
+
+  async function reloadChats() {
+    const response = await listChats(token);
+    setChats(response.chats);
+    if (!selectedChatId && response.chats.length > 0) {
+      setSelectedChatId(response.chats[0].id);
+    }
+  }
+
+  async function decodeMessages(items: Message[]) {
+    if (!selectedChatId) {
+      return;
+    }
+    const key = await ensureChatKey(selectedChatId);
+    const decoded: Record<string, string> = {};
+    for (const message of items) {
+      try {
+        decoded[message.id] = await decryptTextWithSharedKey(
+          { ciphertext: message.ciphertext, nonce: message.nonce },
+          key,
+        );
+      } catch {
+        decoded[message.id] = message.ciphertext;
+      }
+    }
+    setDecodeMap(decoded);
+  }
+
+  async function handleCreateDirect(event: React.FormEvent) {
+    event.preventDefault();
+    setStatus("Создаем direct-чат...");
+    try {
+      const chat = await createDirectChat(token, directUsername);
+      setDirectUsername("");
+      await ensureChatKey(chat.id);
+      await reloadChats();
+      setSelectedChatId(chat.id);
+      setStatus("Direct-чат готов");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось создать чат");
+    }
+  }
+
+  async function handleSendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedChatId) {
+      return;
+    }
+
+    setStatus("Отправляем сообщение...");
+    try {
+      const key = await ensureChatKey(selectedChatId);
+      const encrypted = await encryptTextForSharedKey(messageText, key);
+      const message = await sendChatMessage(token, selectedChatId, {
+        ciphertext: encrypted.ciphertext,
+        nonce: encrypted.nonce,
+        message_type: "text",
+      });
+      setMessageText("");
+      setMessages((previous) => [...previous, message]);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
+    }
+  }
+
+  return (
+    <section className="chat-band">
+      <div className="chat-list-pane">
+        <h2>Чаты</h2>
+        <form className="inline-form" onSubmit={handleCreateDirect}>
+          <input
+            list="friend-options"
+            placeholder="Username друга"
+            value={directUsername}
+            onChange={(event) => setDirectUsername(event.target.value)}
+            required
+          />
+          <datalist id="friend-options">
+            {friends.map((friend) => (
+              <option key={friend.id} value={friend.username} />
+            ))}
+          </datalist>
+          <button type="submit">Direct</button>
+        </form>
+        <div className="chat-list">
+          {chats.map((chat) => (
+            <button
+              className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`}
+              key={chat.id}
+              onClick={() => setSelectedChatId(chat.id)}
+              type="button"
+            >
+              <strong>{chat.type === "group" ? chat.title ?? "Группа" : "Direct chat"}</strong>
+              <span>{chat.members.length} участника</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-pane">
+        <h2>Сообщения</h2>
+        <div className="message-list">
+          {messages.map((message) => (
+            <div className={`message ${message.sender.id === me.id ? "mine" : ""}`} key={message.id}>
+              <b>{message.sender.username}</b>
+              <p>{decodeMap[message.id] ?? "..."}</p>
+            </div>
+          ))}
+        </div>
+        <form className="inline-form" onSubmit={handleSendMessage}>
+          <input
+            placeholder="Сообщение"
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
+            required
+          />
+          <button disabled={!selectedChatId} type="submit">
+            Отправить
+          </button>
+        </form>
+        {status ? <p className="form-status">{status}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+async function ensureChatKey(chatId: string): Promise<string> {
+  const storageKey = `${CHAT_KEY_PREFIX}${chatId}`;
+  const existing = localStorage.getItem(storageKey);
+  if (existing) {
+    return existing;
+  }
+
+  const nextKey = await createSharedMessageKey();
+  localStorage.setItem(storageKey, nextKey);
+  return nextKey;
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

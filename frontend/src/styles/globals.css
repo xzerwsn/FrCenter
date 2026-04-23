@@ -348,6 +348,83 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.chat-band {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.chat-list-pane,
+.chat-pane {
+  padding: 20px;
+  border-radius: 24px;
+  background: #4b1220;
+}
+
+.chat-list-pane h2,
+.chat-pane h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+}
+
+.chat-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.chat-row {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: #fff7f7;
+  background: #3d0d18;
+  cursor: pointer;
+}
+
+.chat-row.active {
+  outline: 2px solid #fff4b5;
+}
+
+.chat-row span {
+  color: #e7a8ae;
+  font-size: 12px;
+}
+
+.message-list {
+  min-height: 200px;
+  max-height: 320px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.message {
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #3d0d18;
+}
+
+.message.mine {
+  background: #7f1b2c;
+}
+
+.message b {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.message p {
+  margin: 0;
+  color: #ffe5c4;
+  overflow-wrap: anywhere;
+}
+
 .friend {
   display: grid;
   justify-items: center;
@@ -397,6 +474,10 @@ button:disabled {
   }
 
   .tool-band {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-band {
     grid-template-columns: 1fr;
   }
 
