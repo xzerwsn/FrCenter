@@ -15,6 +15,21 @@ class GroupChatCreate(BaseModel):
     encrypted_group_key: str | None = None
 
 
+class ChatMemberAddRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    encrypted_group_key: str | None = None
+
+
+class ChatMemberRoleUpdateRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=36)
+    role: str = Field(pattern=r"^(admin|member)$")
+
+
+class ChatMemberRemoveRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=36)
+    encrypted_group_key: str | None = None
+
+
 class ChatMemberResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

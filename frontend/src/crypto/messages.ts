@@ -7,6 +7,11 @@ export type EncryptedMessagePayload = {
   nonce: string;
 };
 
+export type EncryptedBinaryPayload = {
+  ciphertextBytes: Uint8Array;
+  nonce: string;
+};
+
 export async function encryptTextForSharedKey(
   plaintext: string,
   sharedKeyBase64: string,
@@ -39,4 +44,18 @@ export async function decryptTextWithSharedKey(
 export async function createSharedMessageKey(): Promise<string> {
   await sodium.ready;
   return bytesToBase64(sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES));
+}
+
+export async function encryptBytesForSharedKey(
+  plaintextBytes: Uint8Array,
+  sharedKeyBase64: string,
+): Promise<EncryptedBinaryPayload> {
+  await sodium.ready;
+  const key = base64ToBytes(sharedKeyBase64);
+  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+  const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, key);
+  return {
+    ciphertextBytes: ciphertext,
+    nonce: bytesToBase64(nonce),
+  };
 }

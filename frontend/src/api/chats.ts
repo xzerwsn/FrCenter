@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPost } from "./client";
 import type { UserPublic } from "./users";
 
 export type ChatMember = {
@@ -46,6 +46,11 @@ export type CreateGroupChatPayload = {
   encrypted_group_key?: string;
 };
 
+export type UpdateGroupMemberRolePayload = {
+  user_id: string;
+  role: "admin" | "member";
+};
+
 export async function listChats(token: string): Promise<ChatListResponse> {
   return apiGet<ChatListResponse>("/api/chats", { token });
 }
@@ -62,6 +67,47 @@ export async function createGroupChat(token: string, payload: CreateGroupChatPay
       usernames: payload.usernames,
       encrypted_group_key: payload.encrypted_group_key ?? null,
     },
+    { token },
+  );
+}
+
+export async function addGroupMember(
+  token: string,
+  chatId: string,
+  username: string,
+  encryptedGroupKey?: string,
+): Promise<Chat> {
+  return apiPost<Chat>(
+    `/api/chats/${chatId}/members`,
+    { username, encrypted_group_key: encryptedGroupKey ?? null },
+    { token },
+  );
+}
+
+export async function updateGroupMemberRole(
+  token: string,
+  chatId: string,
+  payload: UpdateGroupMemberRolePayload,
+): Promise<Chat> {
+  return apiPost<Chat>(
+    `/api/chats/${chatId}/members/role`,
+    {
+      user_id: payload.user_id,
+      role: payload.role,
+    },
+    { token },
+  );
+}
+
+export async function removeGroupMember(
+  token: string,
+  chatId: string,
+  userId: string,
+  encryptedGroupKey?: string,
+): Promise<Chat> {
+  return apiDelete<Chat>(
+    `/api/chats/${chatId}/members`,
+    { user_id: userId, encrypted_group_key: encryptedGroupKey ?? null },
     { token },
   );
 }

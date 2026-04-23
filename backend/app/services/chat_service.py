@@ -30,6 +30,14 @@ class NotChatMember(ChatError):
     pass
 
 
+class ForbiddenChatAction(ChatError):
+    pass
+
+
+async def ensure_chat_member(db: AsyncSession, user_id: str, chat_id: str) -> None:
+    await _ensure_member(db, user_id, chat_id)
+
+
 async def list_chats(db: AsyncSession, current_user: User) -> list[Chat]:
     result = await db.execute(
         select(Chat)
@@ -158,6 +166,119 @@ async def send_message(
     return result.scalar_one()
 
 
+async def add_group_member(
+    db: AsyncSession,
+    current_user: User,
+    chat_id: str,
+    username: str,
+    encrypted_group_key: str | None,
+) -> Chat:
+    actor_member = await _get_active_member(db, chat_id, current_user.id)
+    if actor_member is None:
+        raise NotChatMember
+    if actor_member.role not in {"owner", "admin"}:
+        raise ForbiddenChatAction
+
+    chat = await _get_chat_by_id(db, chat_id)
+    if chat is None or chat.type != "group":
+        raise ChatNotFound
+
+    target = await _get_user_by_username(db, username)
+    if target is None:
+        raise UserNotFound
+
+    existing_member = await _get_active_member(db, chat_id, target.id)
+    if existing_member is not None:
+        return await get_chat(db, current_user, chat_id)
+
+    db.add(
+        ChatMember(
+            chat_id=chat_id,
+            user_id=target.id,
+            role="member",
+            encrypted_group_key=encrypted_group_key,
+        )
+    )
+    if encrypted_group_key:
+        await _set_group_key_for_active_members(db, chat_id, encrypted_group_key)
+    await db.commit()
+    return await get_chat(db, current_user, chat_id)
+
+
+async def update_group_member_role(
+    db: AsyncSession,
+    current_user: User,
+    chat_id: str,
+    target_user_id: str,
+    role: str,
+) -> Chat:
+    actor_member = await _get_active_member(db, chat_id, current_user.id)
+    if actor_member is None:
+        raise NotChatMember
+
+    chat = await _get_chat_by_id(db, chat_id)
+    if chat is None or chat.type != "group":
+        raise ChatNotFound
+
+    target_member = await _get_active_member(db, chat_id, target_user_id)
+    if target_member is None:
+        raise UserNotFound
+
+    if target_member.role == "owner":
+        raise ForbiddenChatAction
+
+    if actor_member.role != "owner":
+        raise ForbiddenChatAction
+
+    target_member.role = role
+
+    await db.commit()
+    return await get_chat(db, current_user, chat_id)
+
+
+async def remove_group_member(
+    db: AsyncSession,
+    current_user: User,
+    chat_id: str,
+    target_user_id: str,
+    encrypted_group_key: str | None = None,
+) -> Chat:
+    actor_member = await _get_active_member(db, chat_id, current_user.id)
+    if actor_member is None:
+        raise NotChatMember
+
+    chat = await _get_chat_by_id(db, chat_id)
+    if chat is None or chat.type != "group":
+        raise ChatNotFound
+
+    target_member = await _get_active_member(db, chat_id, target_user_id)
+    if target_member is None:
+        raise UserNotFound
+
+    is_self = target_user_id == current_user.id
+    if target_member.role == "owner" and not is_self:
+        raise ForbiddenChatAction
+
+    if actor_member.role == "owner":
+        pass
+    elif actor_member.role == "admin":
+        if target_member.role != "member" and not is_self:
+            raise ForbiddenChatAction
+    elif not is_self:
+        raise ForbiddenChatAction
+
+    target_member.left_at = datetime.now(UTC)
+    if encrypted_group_key:
+        await _set_group_key_for_active_members(db, chat_id, encrypted_group_key)
+    await db.commit()
+    if target_user_id == current_user.id:
+        chat = await _get_chat_with_members(db, chat_id)
+        if chat is None:
+            raise ChatNotFound
+        return chat
+    return await get_chat(db, current_user, chat_id)
+
+
 async def _get_user_by_username(db: AsyncSession, username: str) -> User | None:
     result = await db.execute(select(User).where(User.username == username))
     return result.scalar_one_or_none()
@@ -205,6 +326,37 @@ async def _ensure_member(db: AsyncSession, user_id: str, chat_id: str) -> None:
 async def _get_active_members(db: AsyncSession, chat_id: str) -> list[ChatMember]:
     result = await db.execute(select(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.left_at.is_(None)))
     return list(result.scalars().all())
+
+
+async def _get_active_member(db: AsyncSession, chat_id: str, user_id: str) -> ChatMember | None:
+    result = await db.execute(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == user_id,
+            ChatMember.left_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _get_chat_by_id(db: AsyncSession, chat_id: str) -> Chat | None:
+    result = await db.execute(select(Chat).where(Chat.id == chat_id))
+    return result.scalar_one_or_none()
+
+
+async def _get_chat_with_members(db: AsyncSession, chat_id: str) -> Chat | None:
+    result = await db.execute(
+        select(Chat)
+        .where(Chat.id == chat_id)
+        .options(selectinload(Chat.members).selectinload(ChatMember.user))
+    )
+    return result.scalar_one_or_none()
+
+
+async def _set_group_key_for_active_members(db: AsyncSession, chat_id: str, encrypted_group_key: str) -> None:
+    members = await _get_active_members(db, chat_id)
+    for member in members:
+        member.encrypted_group_key = encrypted_group_key
 
 
 def _ordered_pair(user_a_id: str, user_b_id: str) -> tuple[str, str]:

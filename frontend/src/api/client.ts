@@ -20,6 +20,15 @@ export async function apiPost<T>(path: string, body: unknown, options: ApiOption
   return parseResponse<T>(response);
 }
 
+export async function apiDelete<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+  const response = await safeFetch(`${backendUrl}${path}`, {
+    method: "DELETE",
+    headers: createHeaders(options.token),
+    body: JSON.stringify(body),
+  });
+  return parseResponse<T>(response);
+}
+
 function createHeaders(token?: string): HeadersInit {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

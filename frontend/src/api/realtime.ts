@@ -1,3 +1,5 @@
+const backendHttpUrl = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
+
 export type RealtimeEvent =
   | {
       type: "message.new";
@@ -10,7 +12,8 @@ export type RealtimeEvent =
     };
 
 export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) => void): WebSocket {
-  const socket = new WebSocket(`ws://127.0.0.1:8000/ws?token=${encodeURIComponent(token)}`);
+  const wsUrl = buildWebSocketUrl();
+  const socket = new WebSocket(`${wsUrl}/ws?token=${encodeURIComponent(token)}`);
 
   socket.onmessage = (event) => {
     try {
@@ -22,4 +25,14 @@ export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) =
   };
 
   return socket;
+}
+
+function buildWebSocketUrl(): string {
+  try {
+    const parsed = new URL(backendHttpUrl);
+    const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${parsed.host}`;
+  } catch {
+    return "ws://localhost:8000";
+  }
 }

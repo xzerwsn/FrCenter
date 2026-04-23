@@ -1,33 +1,47 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { Gamepad2, Home, LogOut, MessageCircle, Newspaper, Settings, Users } from "lucide-react";
+import {
+  Bell,
+  Gamepad2,
+  Home,
+  LogOut,
+  MessageCircle,
+  PlaySquare,
+  Settings,
+  UserRound,
+  Users,
+} from "lucide-react";
 
 import { confirmEmail, login, register } from "../api/auth";
 import {
   type Chat,
   type Message,
+  addGroupMember,
   createDirectChat,
   createGroupChat,
   listChatMessages,
   listChats,
+  removeGroupMember,
   sendChatMessage,
+  updateGroupMemberRole,
 } from "../api/chats";
 import { registerDevice } from "../api/devices";
-import {
-  addFriendByCode,
-  createInviteCode,
-  listFriends,
-  searchUsers,
-  sendFriendRequest,
-} from "../api/friends";
+import { addFriendByCode, createInviteCode, listFriends, searchUsers, sendFriendRequest } from "../api/friends";
+import { uploadEncryptedMedia } from "../api/media";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, type CurrentUser, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
-import { createSharedMessageKey, decryptTextWithSharedKey, encryptTextForSharedKey } from "../crypto/messages";
+import {
+  createSharedMessageKey,
+  decryptTextWithSharedKey,
+  encryptBytesForSharedKey,
+  encryptTextForSharedKey,
+} from "../crypto/messages";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
 
 type AuthMode = "login" | "register" | "confirm";
+type DashboardSection = "profile" | "home" | "chats" | "friends" | "notifications" | "games" | "clips" | "settings";
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
 
@@ -36,8 +50,6 @@ function App() {
   const [authMode, setAuthMode] = React.useState<AuthMode>("login");
   const [pendingEmail, setPendingEmail] = React.useState("");
   const [devCode, setDevCode] = React.useState<string | null>(null);
-  const [deviceStatus, setDeviceStatus] = React.useState("Ключи устройства еще не созданы");
-  const [deviceFingerprint, setDeviceFingerprint] = React.useState<string | null>(null);
 
   async function handleAuthenticated(token: string, cloudPassword: string) {
     const user = await getMe(token);
@@ -48,27 +60,20 @@ function App() {
   }
 
   async function createAndRegisterDevice(token: string, cloudPassword: string) {
-    setDeviceStatus("Генерируем ключи локально...");
     const bundle = await createDeviceKeyBundle("Windows Desktop", cloudPassword);
     await registerDevice(token, bundle);
-    const fingerprint = await fingerprintPublicKey(bundle.publicKey);
-    setDeviceFingerprint(fingerprint);
-    setDeviceStatus("Устройство зарегистрировано, приватный ключ зашифрован облачным паролем");
+    await fingerprintPublicKey(bundle.publicKey);
   }
 
   function handleLogout() {
     clearSession();
     setSession(null);
-    setDeviceFingerprint(null);
-    setDeviceStatus("Ключи устройства еще не созданы");
   }
 
   if (!session) {
     return (
       <AuthShell>
-        {authMode === "login" ? (
-          <LoginForm onLogin={handleAuthenticated} onSwitch={() => setAuthMode("register")} />
-        ) : null}
+        {authMode === "login" ? <LoginForm onLogin={handleAuthenticated} onSwitch={() => setAuthMode("register")} /> : null}
         {authMode === "register" ? (
           <RegisterForm
             onRegistered={(email, code) => {
@@ -94,10 +99,7 @@ function App() {
   return (
     <Dashboard
       session={session}
-      deviceStatus={deviceStatus}
-      deviceFingerprint={deviceFingerprint}
       onLogout={handleLogout}
-      onCreateDeviceKeys={(cloudPassword) => createAndRegisterDevice(session.token, cloudPassword)}
     />
   );
 }
@@ -151,12 +153,7 @@ function LoginForm({
       </label>
       <label>
         Облачный пароль
-        <input
-          value={cloudPassword}
-          onChange={(event) => setCloudPassword(event.target.value)}
-          type="password"
-          required
-        />
+        <input value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} type="password" required />
       </label>
       <button type="submit">Войти</button>
       <button className="link-button" onClick={onSwitch} type="button">
@@ -216,25 +213,25 @@ function RegisterForm({
       </label>
       <label>
         Пароль
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            type="password"
-            minLength={8}
-            maxLength={256}
-            required
-          />
+        <input
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          type="password"
+          minLength={8}
+          maxLength={256}
+          required
+        />
       </label>
       <label>
         Облачный пароль
-          <input
-            value={cloudPassword}
-            onChange={(event) => setCloudPassword(event.target.value)}
-            type="password"
-            minLength={8}
-            maxLength={256}
-            required
-          />
+        <input
+          value={cloudPassword}
+          onChange={(event) => setCloudPassword(event.target.value)}
+          type="password"
+          minLength={8}
+          maxLength={256}
+          required
+        />
       </label>
       <button type="submit">Зарегистрироваться</button>
       <button className="link-button" onClick={onSwitch} type="button">
@@ -293,119 +290,277 @@ function ConfirmForm({
 
 function Dashboard({
   session,
-  deviceStatus,
-  deviceFingerprint,
   onLogout,
-  onCreateDeviceKeys,
 }: {
   session: Session;
-  deviceStatus: string;
-  deviceFingerprint: string | null;
   onLogout: () => void;
-  onCreateDeviceKeys: (cloudPassword: string) => Promise<void>;
 }) {
-  const [cloudPassword, setCloudPassword] = React.useState("");
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
+  const [section, setSection] = React.useState<DashboardSection>("home");
+  const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(null);
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
   }, [session.token]);
 
+  function openOwnProfile() {
+    setSelectedProfile(session.user);
+    setSection("profile");
+  }
+
+  function openFriendProfile(friend: UserPublic) {
+    setSelectedProfile(friend);
+    setSection("profile");
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand">FC</div>
-        <button aria-label="Главная"><Home size={20} /></button>
-        <button aria-label="Чаты"><MessageCircle size={20} /></button>
-        <button aria-label="Друзья"><Users size={20} /></button>
-        <button aria-label="Лента"><Newspaper size={20} /></button>
-        <button aria-label="Игры"><Gamepad2 size={20} /></button>
-        <button aria-label="Настройки"><Settings size={20} /></button>
+        <button
+          aria-label="Профиль"
+          className={`profile-button ${section === "profile" ? "active" : ""}`}
+          onClick={openOwnProfile}
+          type="button"
+        >
+          <div className="brand">{session.user.username.slice(0, 1).toUpperCase()}</div>
+        </button>
+        <button aria-label="Главная" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
+          <Home size={20} />
+        </button>
+        <button aria-label="Чаты" className={section === "chats" ? "active" : ""} onClick={() => setSection("chats")} type="button">
+          <MessageCircle size={20} />
+        </button>
+        <button aria-label="Друзья" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
+          <Users size={20} />
+        </button>
+        <button
+          aria-label="Уведомления"
+          className={section === "notifications" ? "active" : ""}
+          onClick={() => setSection("notifications")}
+          type="button"
+        >
+          <Bell size={20} />
+        </button>
+        <button aria-label="Игровая зона" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
+          <Gamepad2 size={20} />
+        </button>
+        <button aria-label="Клипы" className={section === "clips" ? "active" : ""} onClick={() => setSection("clips")} type="button">
+          <PlaySquare size={20} />
+        </button>
+        <button
+          aria-label="Настройки"
+          className={section === "settings" ? "active" : ""}
+          onClick={() => setSection("settings")}
+          type="button"
+        >
+          <Settings size={20} />
+        </button>
       </aside>
 
       <section className="content">
         <header className="topbar">
-          <p>Добро пожаловать, <strong>{session.user.username.toUpperCase()}</strong></p>
+          <p>
+            Добро пожаловать, <strong>{session.user.username.toUpperCase()}</strong>
+          </p>
           <div className="topbar-actions">
             <input placeholder="Поиск" />
-            <button aria-label="Выйти" onClick={onLogout} type="button"><LogOut size={18} /></button>
+            <button aria-label="Выйти" onClick={onLogout} type="button">
+              <LogOut size={18} />
+            </button>
           </div>
         </header>
 
-        <section className="hero">
-          <div>
-            <span>Популярное</span>
-            <h1>FrCenter</h1>
-            <p>Игровой чат, друзья, группы, новости и сквозное шифрование.</p>
-          </div>
-        </section>
-
-        <section className="grid">
-          <article>
-            <h2>Чаты</h2>
-            <p>Личные и групповые E2EE-чаты через WebSocket.</p>
-          </article>
-          <article>
-            <h2>Лента</h2>
-            <p>Посты друзей, комментарии, реакции и игровые статусы.</p>
-          </article>
-          <article>
-            <h2>Статистика</h2>
-            <p>Steam и Riot появятся первыми, Epic и EA позже.</p>
-          </article>
-          <article>
-            <h2>E2EE</h2>
-            <p>{deviceStatus}</p>
-            {deviceFingerprint ? <small>Fingerprint: {deviceFingerprint}</small> : null}
-            <input
-              className="compact-input"
-              placeholder="Облачный пароль"
-              value={cloudPassword}
-              onChange={(event) => setCloudPassword(event.target.value)}
-              type="password"
-            />
-            <button
-              className="inline-action"
-              disabled={!cloudPassword}
-              onClick={() => onCreateDeviceKeys(cloudPassword)}
-              type="button"
-            >
-              Обновить ключи
-            </button>
-          </article>
-        </section>
-
-        <FriendsPanel token={session.token} onFriendsChanged={setFriends} />
-        <ChatsPanel token={session.token} me={session.user} friends={friends} />
+        {section === "profile" ? <ProfilePanel profile={selectedProfile ?? session.user} /> : null}
+        {section === "home" ? <HomePanel friends={friends} /> : null}
+        {section === "chats" ? <ChatsPanel token={session.token} me={session.user} friends={friends} /> : null}
+        {section === "friends" ? (
+          <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
+        ) : null}
+        {section === "notifications" ? <NotificationsPanel /> : null}
+        {section === "games" ? <GamesPanel friends={friends} /> : null}
+        {section === "clips" ? <ClipsPanel friends={friends} /> : null}
+        {section === "settings" ? <SettingsPanel /> : null}
       </section>
 
       <aside className="friends">
         {friends.map((friend) => (
-          <div className="friend" key={friend.id}>
+          <button className="friend" key={friend.id} onClick={() => openFriendProfile(friend)} type="button">
             <div>{friend.username.slice(0, 1).toUpperCase()}</div>
             <span>{friend.username}</span>
-          </div>
+          </button>
         ))}
       </aside>
     </main>
   );
 }
 
+function ProfilePanel({ profile }: { profile: UserPublic | CurrentUser }) {
+  const game = profile.current_game ?? "Не играет";
+  const status = profile.status || "offline";
+  return (
+    <section className="tool-band">
+      <div>
+        <h2>Профиль</h2>
+        <div className="result-row">
+          <span>
+            <b>{profile.username}</b> · {status}
+          </span>
+          <UserRound size={18} />
+        </div>
+        <p className="form-status">Текущая игра: {game}</p>
+      </div>
+      <div>
+        <h2>Общее</h2>
+        {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
+        <p className="form-status">ID: {profile.id}</p>
+      </div>
+    </section>
+  );
+}
+
+function HomePanel({ friends }: { friends: UserPublic[] }) {
+  return (
+    <section className="tool-band single-column">
+      <div>
+        <h2>Главная</h2>
+        <div className="result-list">
+          {friends.length === 0 ? <p className="form-status">Пока нет друзей</p> : null}
+          {friends.map((friend) => (
+            <div className="result-row" key={friend.id}>
+              <span>{friend.username}</span>
+              <span className={`status-pill status-${normalizeStatus(friend.status)}`}>{humanizeStatus(friend.status)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NotificationsPanel() {
+  return (
+    <section className="tool-band single-column">
+      <div>
+        <h2>Уведомления</h2>
+        <div className="result-list">
+          <div className="result-row">
+            <span>Новых уведомлений пока нет</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function GamesPanel({ friends }: { friends: UserPublic[] }) {
+  return (
+    <section className="tool-band">
+      <div>
+        <h2>Игровая зона</h2>
+        <p className="form-status">Steam и Riot: настройка интеграций будет в этом разделе.</p>
+        <div className="result-list">
+          {friends.map((friend) => (
+            <div className="result-row" key={friend.id}>
+              <span>{friend.username}</span>
+              <span>{friend.current_game ?? "Не играет"}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <h2>Интеграции</h2>
+        <div className="result-list">
+          <div className="result-row">
+            <span>Steam</span>
+            <button type="button">Подключить</button>
+          </div>
+          <div className="result-row">
+            <span>Riot Games</span>
+            <button type="button">Подключить</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ClipsPanel({ friends }: { friends: UserPublic[] }) {
+  return (
+    <section className="tool-band single-column">
+      <div>
+        <h2>Клипы</h2>
+        <p className="form-status">Медиа-посты друзей (видео/фото) будут отображаться здесь.</p>
+        <div className="result-list">
+          {friends.slice(0, 6).map((friend) => (
+            <div className="result-row" key={friend.id}>
+              <span>{friend.username}</span>
+              <span>Публикаций: 0</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SettingsPanel({
+}: {
+}) {
+  const [darkTheme, setDarkTheme] = React.useState(true);
+  const [autoStart, setAutoStart] = React.useState(false);
+  const [notifEnabled, setNotifEnabled] = React.useState(true);
+
+  return (
+    <section className="tool-band">
+      <div>
+        <h2>Настройки</h2>
+        <div className="result-list">
+          <label className="result-row">
+            <span>Темная тема</span>
+            <input checked={darkTheme} onChange={() => setDarkTheme((v) => !v)} type="checkbox" />
+          </label>
+          <label className="result-row">
+            <span>Запуск вместе с Windows</span>
+            <input checked={autoStart} onChange={() => setAutoStart((v) => !v)} type="checkbox" />
+          </label>
+          <label className="result-row">
+            <span>Уведомления</span>
+            <input checked={notifEnabled} onChange={() => setNotifEnabled((v) => !v)} type="checkbox" />
+          </label>
+        </div>
+      </div>
+      <div>
+        <h2>Безопасность</h2>
+        <p className="form-status">Сквозное шифрование работает автоматически.</p>
+        <p className="form-status">Ключи создаются и обновляются без ручных действий пользователя.</p>
+      </div>
+    </section>
+  );
+}
+
 function FriendsPanel({
   token,
   onFriendsChanged,
+  onOpenProfile,
 }: {
   token: string;
   onFriendsChanged: (friends: UserPublic[]) => void;
+  onOpenProfile: (friend: UserPublic) => void;
 }) {
   const [query, setQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState<UserPublic[]>([]);
+  const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
 
+  React.useEffect(() => {
+    void refreshFriends();
+  }, [token]);
+
   async function refreshFriends() {
     const response = await listFriends(token);
+    setFriends(response.friends);
     onFriendsChanged(response.friends);
   }
 
@@ -426,6 +581,7 @@ function FriendsPanel({
     try {
       await sendFriendRequest(token, username);
       setStatus("Заявка отправлена");
+      await refreshFriends();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось отправить заявку");
     }
@@ -460,14 +616,19 @@ function FriendsPanel({
       <div>
         <h2>Друзья</h2>
         <form className="inline-form" onSubmit={handleSearch}>
-          <input
-            placeholder="Username"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            required
-          />
+          <input placeholder="Username" value={query} onChange={(event) => setQuery(event.target.value)} required />
           <button type="submit">Найти</button>
         </form>
+        <div className="result-list">
+          {friends.map((friend) => (
+            <div className="result-row" key={friend.id}>
+              <span>{friend.username}</span>
+              <button onClick={() => onOpenProfile(friend)} type="button">
+                Профиль
+              </button>
+            </div>
+          ))}
+        </div>
         <div className="result-list">
           {searchResults.map((user) => (
             <div className="result-row" key={user.id}>
@@ -487,12 +648,7 @@ function FriendsPanel({
         </button>
         {inviteCode ? <small className="invite-code">{inviteCode}</small> : null}
         <form className="inline-form stacked" onSubmit={handleAddByCode}>
-          <input
-            placeholder="Код друга"
-            value={joinCode}
-            onChange={(event) => setJoinCode(event.target.value)}
-            required
-          />
+          <input placeholder="Код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
           <button type="submit">Добавить</button>
         </form>
       </div>
@@ -514,11 +670,17 @@ function ChatsPanel({
   const [selectedChatId, setSelectedChatId] = React.useState<string>("");
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
+  const [attachmentFile, setAttachmentFile] = React.useState<File | null>(null);
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
   const [directUsername, setDirectUsername] = React.useState("");
   const [groupTitle, setGroupTitle] = React.useState("");
   const [groupUsernames, setGroupUsernames] = React.useState("");
+  const [memberUsername, setMemberUsername] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const selectedChat = chats.find((chat) => chat.id === selectedChatId) ?? null;
+  const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
+  const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
+  const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
 
   React.useEffect(() => {
     void reloadChats();
@@ -543,10 +705,7 @@ function ChatsPanel({
       }
       void reloadChats();
     });
-
-    return () => {
-      socket.close();
-    };
+    return () => socket.close();
   }, [selectedChatId, token]);
 
   React.useEffect(() => {
@@ -569,10 +728,7 @@ function ChatsPanel({
     const decoded: Record<string, string> = {};
     for (const message of items) {
       try {
-        decoded[message.id] = await decryptTextWithSharedKey(
-          { ciphertext: message.ciphertext, nonce: message.nonce },
-          key,
-        );
+        decoded[message.id] = await decryptTextWithSharedKey({ ciphertext: message.ciphertext, nonce: message.nonce }, key);
       } catch {
         decoded[message.id] = message.ciphertext;
       }
@@ -603,17 +759,11 @@ function ChatsPanel({
         .split(",")
         .map((item) => item.trim())
         .filter((item) => item.length > 0);
-
       if (usernames.length === 0) {
         setStatus("Укажи хотя бы одного участника через запятую");
         return;
       }
-
-      const uniqueUsernames = Array.from(new Set(usernames));
-      const chat = await createGroupChat(token, {
-        title: groupTitle.trim(),
-        usernames: uniqueUsernames,
-      });
+      const chat = await createGroupChat(token, { title: groupTitle.trim(), usernames: Array.from(new Set(usernames)) });
       setGroupTitle("");
       setGroupUsernames("");
       await ensureChatKey(chat.id);
@@ -625,12 +775,59 @@ function ChatsPanel({
     }
   }
 
+  async function handleAddMember(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedChatId) {
+      return;
+    }
+    setStatus("Добавляем участника...");
+    try {
+      const rotatedKey = await createSharedMessageKey();
+      await addGroupMember(token, selectedChatId, memberUsername.trim(), rotatedKey);
+      localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
+      setMemberUsername("");
+      await reloadChats();
+      setStatus("Участник добавлен");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось добавить участника");
+    }
+  }
+
+  async function handleRoleChange(userId: string, role: "admin" | "member") {
+    if (!selectedChatId) {
+      return;
+    }
+    setStatus("Обновляем роль...");
+    try {
+      await updateGroupMemberRole(token, selectedChatId, { user_id: userId, role });
+      await reloadChats();
+      setStatus("Роль обновлена");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось обновить роль");
+    }
+  }
+
+  async function handleRemoveMember(userId: string) {
+    if (!selectedChatId) {
+      return;
+    }
+    setStatus("Удаляем участника...");
+    try {
+      const rotatedKey = await createSharedMessageKey();
+      await removeGroupMember(token, selectedChatId, userId, rotatedKey);
+      localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
+      await reloadChats();
+      setStatus("Участник удален");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось удалить участника");
+    }
+  }
+
   async function handleSendMessage(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedChatId) {
       return;
     }
-
     setStatus("Отправляем сообщение...");
     try {
       const key = await ensureChatKey(selectedChatId);
@@ -648,18 +845,74 @@ function ChatsPanel({
     }
   }
 
+  async function handleSendAttachment(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedChatId || !attachmentFile) {
+      return;
+    }
+    setStatus("Шифруем и отправляем вложение...");
+    try {
+      const chatKey = await ensureChatKey(selectedChatId);
+      const fileBytes = new Uint8Array(await attachmentFile.arrayBuffer());
+      const encryptedFile = await encryptBytesForSharedKey(fileBytes, chatKey);
+      const encryptedBuffer = new ArrayBuffer(encryptedFile.ciphertextBytes.byteLength);
+      new Uint8Array(encryptedBuffer).set(encryptedFile.ciphertextBytes);
+      const encryptedBlob = new Blob([encryptedBuffer], { type: "application/octet-stream" });
+      const encryptedFileObject = new File([encryptedBlob], `${attachmentFile.name}.enc`, { type: "application/octet-stream" });
+      const media = await uploadEncryptedMedia(token, selectedChatId, encryptedFileObject);
+      const encryptedPayload = await encryptTextForSharedKey(
+        JSON.stringify({
+          kind: "media",
+          media_id: media.media_id,
+          media_url: media.media_url,
+          file_name: attachmentFile.name,
+          file_size: attachmentFile.size,
+          file_mime: attachmentFile.type || "application/octet-stream",
+          file_nonce: encryptedFile.nonce,
+        }),
+        chatKey,
+      );
+      const message = await sendChatMessage(token, selectedChatId, {
+        ciphertext: encryptedPayload.ciphertext,
+        nonce: encryptedPayload.nonce,
+        message_type: "media",
+      });
+      setMessages((previous) => [...previous, message]);
+      setAttachmentFile(null);
+      setStatus("Вложение отправлено");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось отправить вложение");
+    }
+  }
+
+  async function handleDownloadMedia(mediaUrl: string, filename: string) {
+    try {
+      const response = await fetch(mediaUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error(`Не удалось скачать файл (${response.status})`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось скачать вложение");
+    }
+  }
+
   return (
     <section className="chat-band">
       <div className="chat-list-pane">
         <h2>Чаты</h2>
         <form className="inline-form" onSubmit={handleCreateDirect}>
-          <input
-            list="friend-options"
-            placeholder="Username друга"
-            value={directUsername}
-            onChange={(event) => setDirectUsername(event.target.value)}
-            required
-          />
+          <input list="friend-options" placeholder="Username друга" value={directUsername} onChange={(event) => setDirectUsername(event.target.value)} required />
           <datalist id="friend-options">
             {friends.map((friend) => (
               <option key={friend.id} value={friend.username} />
@@ -668,30 +921,13 @@ function ChatsPanel({
           <button type="submit">Direct</button>
         </form>
         <form className="inline-form stacked" onSubmit={handleCreateGroup}>
-          <input
-            placeholder="Название группы"
-            value={groupTitle}
-            onChange={(event) => setGroupTitle(event.target.value)}
-            minLength={1}
-            maxLength={120}
-            required
-          />
-          <input
-            placeholder="Участники: user1, user2"
-            value={groupUsernames}
-            onChange={(event) => setGroupUsernames(event.target.value)}
-            required
-          />
+          <input placeholder="Название группы" value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} minLength={1} maxLength={120} required />
+          <input placeholder="Участники: user1, user2" value={groupUsernames} onChange={(event) => setGroupUsernames(event.target.value)} required />
           <button type="submit">Создать группу</button>
         </form>
         <div className="chat-list">
           {chats.map((chat) => (
-            <button
-              className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`}
-              key={chat.id}
-              onClick={() => setSelectedChatId(chat.id)}
-              type="button"
-            >
+            <button className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id} onClick={() => setSelectedChatId(chat.id)} type="button">
               <strong>{chat.type === "group" ? chat.title ?? "Группа" : "Direct chat"}</strong>
               <span>{chat.members.length} участника</span>
             </button>
@@ -701,23 +937,65 @@ function ChatsPanel({
 
       <div className="chat-pane">
         <h2>Сообщения</h2>
+        {selectedChat?.type === "group" ? (
+          <div className="result-list">
+            <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
+            {canManageMembers ? (
+              <form className="inline-form" onSubmit={handleAddMember}>
+                <input
+                  placeholder="Username участника"
+                  value={memberUsername}
+                  onChange={(event) => setMemberUsername(event.target.value)}
+                  minLength={3}
+                  maxLength={32}
+                  required
+                />
+                <button type="submit">Добавить</button>
+              </form>
+            ) : null}
+            {selectedChat.members.map((member) => (
+              <div className="result-row" key={member.user.id}>
+                <span>
+                  {member.user.username} ({member.role})
+                </span>
+                {canManageRoles && member.role !== "owner" ? (
+                  <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
+                    {member.role === "admin" ? "Снять admin" : "Сделать admin"}
+                  </button>
+                ) : null}
+                {canManageMembers && member.role !== "owner" ? (
+                  <button onClick={() => handleRemoveMember(member.user.id)} type="button">
+                    Удалить
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="message-list">
           {messages.map((message) => (
             <div className={`message ${message.sender.id === me.id ? "mine" : ""}`} key={message.id}>
               <b>{message.sender.username}</b>
-              <p>{decodeMap[message.id] ?? "..."}</p>
+              {message.message_type === "media" ? (
+                <MediaMessageView raw={decodeMap[message.id] ?? ""} onDownload={handleDownloadMedia} />
+              ) : (
+                <p>{decodeMap[message.id] ?? "..."}</p>
+              )}
             </div>
           ))}
         </div>
+
         <form className="inline-form" onSubmit={handleSendMessage}>
-          <input
-            placeholder="Сообщение"
-            value={messageText}
-            onChange={(event) => setMessageText(event.target.value)}
-            required
-          />
+          <input placeholder="Сообщение" value={messageText} onChange={(event) => setMessageText(event.target.value)} required />
           <button disabled={!selectedChatId} type="submit">
             Отправить
+          </button>
+        </form>
+        <form className="inline-form" onSubmit={handleSendAttachment}>
+          <input accept="*/*" onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)} type="file" />
+          <button disabled={!selectedChatId || !attachmentFile} type="submit">
+            Отправить файл
           </button>
         </form>
         {status ? <p className="form-status">{status}</p> : null}
@@ -726,13 +1004,101 @@ function ChatsPanel({
   );
 }
 
+function MediaMessageView({
+  raw,
+  onDownload,
+}: {
+  raw: string;
+  onDownload: (mediaUrl: string, filename: string) => void;
+}) {
+  const mediaPayload = parseMediaPayload(raw);
+  if (!mediaPayload) {
+    return <p>{raw || "..."}</p>;
+  }
+  return (
+    <p>
+      Файл: {mediaPayload.file_name} ({formatBytes(mediaPayload.file_size)}){" "}
+      <button className="inline-action" onClick={() => onDownload(mediaPayload.media_url, `${mediaPayload.file_name}.enc`)} type="button">
+        Скачать
+      </button>
+    </p>
+  );
+}
+
+type MediaPayload = {
+  kind: "media";
+  media_id: string;
+  media_url: string;
+  file_name: string;
+  file_size: number;
+  file_mime: string;
+  file_nonce: string;
+};
+
+function parseMediaPayload(raw: string): MediaPayload | null {
+  if (!raw) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(raw) as Partial<MediaPayload>;
+    if (payload.kind !== "media" || typeof payload.media_url !== "string" || typeof payload.file_name !== "string") {
+      return null;
+    }
+    return {
+      kind: "media",
+      media_id: payload.media_id ?? "",
+      media_url: payload.media_url,
+      file_name: payload.file_name,
+      file_size: typeof payload.file_size === "number" ? payload.file_size : 0,
+      file_mime: payload.file_mime ?? "application/octet-stream",
+      file_nonce: payload.file_nonce ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStatus(status: string | null | undefined): "online" | "offline" | "dnd" | "away" {
+  if (status === "online" || status === "offline" || status === "dnd" || status === "away") {
+    return status;
+  }
+  return "offline";
+}
+
+function humanizeStatus(status: string | null | undefined): string {
+  const value = normalizeStatus(status);
+  if (value === "online") {
+    return "в сети";
+  }
+  if (value === "dnd") {
+    return "не беспокоить";
+  }
+  if (value === "away") {
+    return "отошел";
+  }
+  return "не в сети";
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
 async function ensureChatKey(chatId: string): Promise<string> {
   const storageKey = `${CHAT_KEY_PREFIX}${chatId}`;
   const existing = localStorage.getItem(storageKey);
   if (existing) {
     return existing;
   }
-
   const nextKey = await createSharedMessageKey();
   localStorage.setItem(storageKey, nextKey);
   return nextKey;
