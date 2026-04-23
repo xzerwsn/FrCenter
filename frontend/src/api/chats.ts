@@ -54,6 +54,12 @@ export type UpdateGroupMemberRolePayload = {
   role: "admin" | "member";
 };
 
+export type UpdateGroupChatPayload = {
+  title?: string | null;
+  avatar_url?: string | null;
+  background_url?: string | null;
+};
+
 export async function listChats(token: string): Promise<ChatListResponse> {
   return apiGet<ChatListResponse>("/api/chats", { token });
 }
@@ -85,6 +91,22 @@ export async function addGroupMember(
   return apiPost<Chat>(
     `/api/chats/${chatId}/members`,
     { username, encrypted_group_key: encryptedGroupKey ?? null },
+    { token },
+  );
+}
+
+export async function updateGroupChat(
+  token: string,
+  chatId: string,
+  payload: UpdateGroupChatPayload,
+): Promise<Chat> {
+  return apiPatch<Chat>(
+    `/api/chats/${chatId}`,
+    {
+      title: payload.title,
+      avatar_url: payload.avatar_url,
+      background_url: payload.background_url,
+    },
     { token },
   );
 }

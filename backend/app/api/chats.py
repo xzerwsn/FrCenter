@@ -14,6 +14,7 @@ from app.schemas.chat import (
     ChatResponse,
     DirectChatCreate,
     GroupChatCreate,
+    GroupChatUpdateRequest,
     MessageResponse,
     MessageSendRequest,
     MessageUpdateRequest,
@@ -36,6 +37,7 @@ from app.services.chat_service import (
     delete_message,
     remove_group_member,
     send_message,
+    update_group_chat,
     update_group_member_role,
 )
 
@@ -83,6 +85,31 @@ async def create_group(
         )
     except UserNotFound as exc:
         raise HTTPException(status_code=404, detail="One or more users were not found") from exc
+
+
+@router.patch("/{chat_id}", response_model=ChatResponse)
+async def edit_group_chat(
+    chat_id: str,
+    payload: GroupChatUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Chat:
+    updates = payload.model_dump(exclude_unset=True)
+    try:
+        return await update_group_chat(
+            db,
+            current_user,
+            chat_id,
+            title=updates.get("title", ...),
+            avatar_url=updates.get("avatar_url", ...),
+            background_url=updates.get("background_url", ...),
+        )
+    except NotChatMember as exc:
+        raise HTTPException(status_code=404, detail="Chat not found") from exc
+    except ChatNotFound as exc:
+        raise HTTPException(status_code=404, detail="Group chat not found") from exc
+    except ForbiddenChatAction as exc:
+        raise HTTPException(status_code=403, detail="Not enough permissions") from exc
 
 
 @router.post("/{chat_id}/members", response_model=ChatResponse)

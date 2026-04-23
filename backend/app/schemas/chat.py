@@ -17,6 +17,12 @@ class GroupChatCreate(BaseModel):
     background_url: str | None = None
 
 
+class GroupChatUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    avatar_url: str | None = None
+    background_url: str | None = None
+
+
 class ChatMemberAddRequest(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     encrypted_group_key: str | None = None

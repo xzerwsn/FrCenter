@@ -298,6 +298,36 @@ async def update_group_member_role(
     return await get_chat(db, current_user, chat_id)
 
 
+async def update_group_chat(
+    db: AsyncSession,
+    current_user: User,
+    chat_id: str,
+    *,
+    title: str | None | object = ...,
+    avatar_url: str | None | object = ...,
+    background_url: str | None | object = ...,
+) -> Chat:
+    actor_member = await _get_active_member(db, chat_id, current_user.id)
+    if actor_member is None:
+        raise NotChatMember
+    if actor_member.role not in {"owner", "admin"}:
+        raise ForbiddenChatAction
+
+    chat = await _get_chat_by_id(db, chat_id)
+    if chat is None or chat.type != "group":
+        raise ChatNotFound
+
+    if title is not ...:
+        chat.title = title
+    if avatar_url is not ...:
+        chat.avatar_url = avatar_url
+    if background_url is not ...:
+        chat.background_url = background_url
+
+    await db.commit()
+    return await get_chat(db, current_user, chat_id)
+
+
 async def remove_group_member(
     db: AsyncSession,
     current_user: User,

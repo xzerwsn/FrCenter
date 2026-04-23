@@ -7,6 +7,7 @@ import {
   Home,
   LogOut,
   MessageCircle,
+  MoreHorizontal,
   Paperclip,
   Pencil,
   Pin,
@@ -30,6 +31,7 @@ import {
   listChats,
   removeGroupMember,
   sendChatMessage,
+  updateGroupChat,
   updateChatMessage,
   updateGroupMemberRole,
 } from "../api/chats";
@@ -140,6 +142,15 @@ type MessageContextMenuState = {
   message: Message;
   x: number;
   y: number;
+};
+
+type MediaPayloadFile = {
+  media_id: string;
+  media_url: string;
+  file_name: string;
+  file_size: number;
+  file_mime: string;
+  file_nonce: string;
 };
 
 function App() {
@@ -840,7 +851,7 @@ function ChatsPanel({
   const [selectedChatId, setSelectedChatId] = React.useState<string>("");
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
-  const [attachmentFile, setAttachmentFile] = React.useState<File | null>(null);
+  const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([]);
   const [composerDragActive, setComposerDragActive] = React.useState(false);
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
   const [createChatOpen, setCreateChatOpen] = React.useState(false);
@@ -850,7 +861,11 @@ function ChatsPanel({
   const [chatBackgroundDataUrl, setChatBackgroundDataUrl] = React.useState("");
   const [memberUsername, setMemberUsername] = React.useState("");
   const [createParticipantsDropdownOpen, setCreateParticipantsDropdownOpen] = React.useState(false);
-  const [groupSettingsOpen, setGroupSettingsOpen] = React.useState(false);
+  const [chatSettingsModalOpen, setChatSettingsModalOpen] = React.useState(false);
+  const [chatInfoModalOpen, setChatInfoModalOpen] = React.useState(false);
+  const [editChatTitle, setEditChatTitle] = React.useState("");
+  const [editChatAvatarDataUrl, setEditChatAvatarDataUrl] = React.useState("");
+  const [editChatBackgroundDataUrl, setEditChatBackgroundDataUrl] = React.useState("");
   const [contextMenu, setContextMenu] = React.useState<MessageContextMenuState | null>(null);
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState<string | null>(null);
   const [previewMediaType, setPreviewMediaType] = React.useState<string>("");
@@ -862,6 +877,8 @@ function ChatsPanel({
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const avatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
+  const editAvatarInputRef = React.useRef<HTMLInputElement | null>(null);
+  const editBackgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
@@ -977,10 +994,18 @@ function ChatsPanel({
   }, [messages, selectedChatId]);
 
   React.useEffect(() => {
-    if (selectedChat?.type !== "group") {
-      setGroupSettingsOpen(false);
+    if (!selectedChat) {
+      setChatInfoModalOpen(false);
+      setChatSettingsModalOpen(false);
+      return;
     }
-  }, [selectedChat?.type]);
+    setEditChatTitle(selectedChat.title ?? "");
+    setEditChatAvatarDataUrl(selectedChat.avatar_url ?? "");
+    setEditChatBackgroundDataUrl(selectedChat.background_url ?? "");
+    if (selectedChat.type !== "group") {
+      setChatSettingsModalOpen(false);
+    }
+  }, [selectedChat?.id, selectedChat?.type, selectedChat?.title, selectedChat?.avatar_url, selectedChat?.background_url]);
 
   React.useEffect(() => {
     writeStoredStringList(PINNED_CHATS_STORAGE_KEY, pinnedChatIds);
@@ -1180,7 +1205,7 @@ function ChatsPanel({
     });
   }
 
-  async function sendEncryptedAttachment(file: File) {
+  async function uploadEncryptedAttachment(file: File): Promise<MediaPayloadFile> {
     if (!selectedChatId) {
       throw new Error("Чат не выбран");
     }
@@ -1204,11 +1229,14 @@ function ChatsPanel({
       }),
       chatKey,
     );
-    await sendChatMessage(token, selectedChatId, {
-      ciphertext: encryptedPayload.ciphertext,
-      nonce: encryptedPayload.nonce,
-      message_type: "media",
-    });
+    return {
+      media_id: media.media_id,
+      media_url: media.media_url,
+      file_name: file.name,
+      file_size: file.size,
+      file_mime: file.type || "application/octet-stream",
+      file_nonce: encryptedFile.nonce,
+    };
   }
 
   async function handleSendComposer(event: React.FormEvent) {
@@ -1218,7 +1246,7 @@ function ChatsPanel({
     }
 
     const text = messageText.trim();
-    if (!text && !attachmentFile) {
+    if (!text && attachmentFiles.length === 0) {
       setStatus("Введите сообщение или прикрепите файл");
       return;
     }
@@ -1228,15 +1256,66 @@ function ChatsPanel({
         setStatus("Отправляем сообщение...");
         await sendEncryptedText(text);
       }
-      if (attachmentFile) {
-        setStatus("Шифруем и отправляем вложение...");
-        await sendEncryptedAttachment(attachmentFile);
+      if (attachmentFiles.length > 0) {
+        const batches = chunkArray(attachmentFiles, 10);
+        for (let index = 0; index < batches.length; index += 1) {
+          const batch = batches[index];
+          setStatus(`Шифруем и отправляем вложения ${index + 1}/${batches.length}...`);
+          const uploadedFiles = await Promise.all(batch.map((file) => uploadEncryptedAttachment(file)));
+          const chatKey = await ensureChatKey(selectedChatId);
+          const encryptedPayload = await encryptTextForSharedKey(
+            JSON.stringify({
+              kind: "media_batch",
+              files: uploadedFiles,
+            }),
+            chatKey,
+          );
+          await sendChatMessage(token, selectedChatId, {
+            ciphertext: encryptedPayload.ciphertext,
+            nonce: encryptedPayload.nonce,
+            message_type: "media",
+          });
+        }
       }
       setMessageText("");
-      setAttachmentFile(null);
+      setAttachmentFiles([]);
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
+    }
+  }
+
+  function addFilesToComposer(files: File[]) {
+    if (files.length === 0) {
+      return;
+    }
+    setAttachmentFiles((current) => [...current, ...files]);
+  }
+
+  function addFilesFromFileList(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+    addFilesToComposer(Array.from(fileList));
+  }
+
+  function handlePasteAttachments(event: React.ClipboardEvent<HTMLDivElement | HTMLInputElement>) {
+    const items = event.clipboardData?.items;
+    if (!items || !selectedChatId) {
+      return;
+    }
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+    if (files.length > 0) {
+      event.preventDefault();
+      addFilesToComposer(files);
     }
   }
 
@@ -1261,6 +1340,55 @@ function ChatsPanel({
       setChatBackgroundDataUrl(await fileToDataUrl(file));
     } catch {
       setStatus("Не удалось загрузить фон");
+    }
+  }
+
+  async function handleEditAvatarChange(file: File | null) {
+    if (!file) {
+      setEditChatAvatarDataUrl("");
+      return;
+    }
+    try {
+      setEditChatAvatarDataUrl(await fileToDataUrl(file));
+    } catch {
+      setStatus("Не удалось загрузить аватар");
+    }
+  }
+
+  async function handleEditBackgroundChange(file: File | null) {
+    if (!file) {
+      setEditChatBackgroundDataUrl("");
+      return;
+    }
+    try {
+      setEditChatBackgroundDataUrl(await fileToDataUrl(file));
+    } catch {
+      setStatus("Не удалось загрузить фон");
+    }
+  }
+
+  async function handleSaveGroupChatSettings(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selectedChatId || selectedChat?.type !== "group") {
+      return;
+    }
+    const nextTitle = editChatTitle.trim();
+    if (!nextTitle) {
+      setStatus("Укажи название группы");
+      return;
+    }
+    setStatus("Обновляем настройки чата...");
+    try {
+      await updateGroupChat(token, selectedChatId, {
+        title: nextTitle,
+        avatar_url: editChatAvatarDataUrl || null,
+        background_url: editChatBackgroundDataUrl || null,
+      });
+      await reloadChats();
+      setChatSettingsModalOpen(false);
+      setStatus("Настройки обновлены");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось обновить настройки чата");
     }
   }
 
@@ -1318,10 +1446,7 @@ function ChatsPanel({
       return;
     }
     setComposerDragActive(false);
-    const droppedFile = event.dataTransfer.files?.[0] ?? null;
-    if (droppedFile) {
-      setAttachmentFile(droppedFile);
-    }
+    addFilesFromFileList(event.dataTransfer.files);
   }
 
   return (
@@ -1489,33 +1614,125 @@ function ChatsPanel({
         onDragLeave={handleChatPaneDragLeave}
         onDragOver={handleChatPaneDragOver}
         onDrop={handleChatPaneDrop}
+        onPaste={handlePasteAttachments}
         style={chatPaneStyle}
       >
         {selectedChatMeta ? (
           <div className="chat-pane-header">
-            <div className="chat-pane-avatar">
-              {selectedChatMeta.avatarUrl ? (
-                <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} />
-              ) : (
-                selectedChatMeta.initials
-              )}
-            </div>
-            <div className="chat-pane-meta">
-              <h2>{selectedChatMeta.title}</h2>
+            <button className="chat-meta-pill" onClick={() => setChatInfoModalOpen(true)} type="button">
+              <strong>{selectedChatMeta.title}</strong>
               <span>{selectedChatMeta.subtitle}</span>
-            </div>
+            </button>
+            {selectedChat?.type === "group" ? (
+              <button
+                aria-label="Настройки чата"
+                className="chat-pane-settings-button"
+                onClick={() => setChatSettingsModalOpen(true)}
+                type="button"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+            ) : null}
           </div>
         ) : (
           <h2>Сообщения</h2>
         )}
 
-        {selectedChat?.type === "group" ? (
-          <div className="chat-settings">
-            <button className="chat-settings-toggle" onClick={() => setGroupSettingsOpen((open) => !open)} type="button">
-              Настройки чата
-              <ChevronDown className={groupSettingsOpen ? "rotated" : ""} size={16} />
-            </button>
-            <div className={`chat-settings-panel ${groupSettingsOpen ? "open" : ""}`}>
+        {chatInfoModalOpen && selectedChat ? (
+          <div className="create-chat-modal-overlay" onClick={() => setChatInfoModalOpen(false)}>
+            <div className="create-chat-modal chat-meta-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="create-chat-modal-header">
+                <h3>Информация о чате</h3>
+                <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setChatInfoModalOpen(false)} type="button">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="chat-meta-profile">
+                <div className="chat-pane-avatar">
+                  {selectedChatMeta?.avatarUrl ? (
+                    <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} />
+                  ) : (
+                    selectedChatMeta?.initials
+                  )}
+                </div>
+                <div className="chat-pane-meta">
+                  <h2>{selectedChatMeta?.title}</h2>
+                  <span>{selectedChat.members.length} участников</span>
+                </div>
+              </div>
+              <div className="result-list">
+                {selectedChat.members.map((member) => (
+                  <div className="result-row" key={member.user.id}>
+                    <span>
+                      {member.user.username} · {humanizeStatus(member.user.status)}
+                    </span>
+                    <span>{member.role}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {chatSettingsModalOpen && selectedChat?.type === "group" ? (
+          <div className="create-chat-modal-overlay" onClick={() => setChatSettingsModalOpen(false)}>
+            <div className="create-chat-modal chat-settings-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="create-chat-modal-header">
+                <h3>Настройки чата</h3>
+                <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setChatSettingsModalOpen(false)} type="button">
+                  <X size={16} />
+                </button>
+              </div>
+              <form className="create-chat-form" onSubmit={handleSaveGroupChatSettings}>
+                <input
+                  className="compact-input"
+                  maxLength={120}
+                  onChange={(event) => setEditChatTitle(event.target.value)}
+                  placeholder="Название группы"
+                  value={editChatTitle}
+                />
+                <div className="create-chat-media">
+                  <button disabled={!canManageMembers} onClick={() => editAvatarInputRef.current?.click()} type="button">
+                    Аватар чата
+                  </button>
+                  <button disabled={!canManageMembers} onClick={() => editBackgroundInputRef.current?.click()} type="button">
+                    Фон чата
+                  </button>
+                  <input
+                    accept="image/*"
+                    className="visually-hidden"
+                    onChange={(event) => void handleEditAvatarChange(event.target.files?.[0] ?? null)}
+                    ref={editAvatarInputRef}
+                    type="file"
+                  />
+                  <input
+                    accept="image/*"
+                    className="visually-hidden"
+                    onChange={(event) => void handleEditBackgroundChange(event.target.files?.[0] ?? null)}
+                    ref={editBackgroundInputRef}
+                    type="file"
+                  />
+                </div>
+                {editChatAvatarDataUrl || editChatBackgroundDataUrl ? (
+                  <div className="create-chat-previews">
+                    {editChatAvatarDataUrl ? (
+                      <div className="create-chat-preview-card">
+                        <span>Аватар</span>
+                        <img alt="Аватар чата" src={editChatAvatarDataUrl} />
+                      </div>
+                    ) : null}
+                    {editChatBackgroundDataUrl ? (
+                      <div className="create-chat-preview-card">
+                        <span>Фон</span>
+                        <img alt="Фон чата" src={editChatBackgroundDataUrl} />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <button disabled={!canManageMembers} type="submit">
+                  Сохранить
+                </button>
+              </form>
               <div className="result-list">
                 <p className="form-status">Моя роль: {myMember?.role ?? "member"}</p>
                 {canManageMembers ? (
@@ -1634,7 +1851,11 @@ function ChatsPanel({
           <input
             accept="*/*"
             className="visually-hidden"
-            onChange={(event) => setAttachmentFile(event.target.files?.[0] ?? null)}
+            multiple
+            onChange={(event) => {
+              addFilesFromFileList(event.target.files);
+              event.currentTarget.value = "";
+            }}
             ref={attachmentInputRef}
             type="file"
           />
@@ -1648,27 +1869,36 @@ function ChatsPanel({
             <Paperclip size={16} />
           </button>
           <input
+            onPaste={handlePasteAttachments}
             onChange={(event) => setMessageText(event.target.value)}
             placeholder="Сообщение"
             value={messageText}
           />
-          <button disabled={!selectedChatId || (!messageText.trim() && !attachmentFile)} type="submit">
+          <button disabled={!selectedChatId || (!messageText.trim() && attachmentFiles.length === 0)} type="submit">
             Отправить
           </button>
         </form>
 
-        {attachmentFile ? (
-          <div className="attachment-chip">
-            <span>{attachmentFile.name}</span>
-            <button aria-label="Убрать файл" onClick={() => setAttachmentFile(null)} type="button">
-              <X size={14} />
-            </button>
+        {attachmentFiles.length > 0 ? (
+          <div className="attachment-list">
+            {attachmentFiles.map((file, index) => (
+              <div className="attachment-chip" key={`${file.name}-${file.size}-${index}`}>
+                <span>{file.name}</span>
+                <button
+                  aria-label="Убрать файл"
+                  onClick={() => setAttachmentFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                  type="button"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         ) : null}
 
         {status ? <p className="form-status">{status}</p> : null}
 
-        {previewMediaUrl ? (
+        {previewMediaUrl && previewMediaType.startsWith("image/") ? (
           <div
             className="media-preview-overlay"
             onClick={() => {
@@ -1678,16 +1908,8 @@ function ChatsPanel({
             role="button"
             tabIndex={0}
           >
-            <div className="media-preview-dialog" onClick={(event) => event.stopPropagation()}>
-              {previewMediaType.startsWith("video/") ? (
-                <video className="media-preview-view" controls src={previewMediaUrl} />
-              ) : previewMediaType.startsWith("image/") ? (
-                <img alt="Медиа" className="media-preview-view" src={previewMediaUrl} />
-              ) : (
-                <a className="inline-action" href={previewMediaUrl} rel="noreferrer" target="_blank">
-                  Открыть файл в новой вкладке
-                </a>
-              )}
+            <div className="media-preview-dialog media-preview-dialog-image" onClick={(event) => event.stopPropagation()}>
+              <img alt="Медиа" className="media-preview-view media-preview-view-image" src={previewMediaUrl} />
             </div>
           </div>
         ) : null}
@@ -1708,41 +1930,46 @@ function MediaMessageView({
   raw: string;
   onPreview: (url: string, mediaType: string) => void;
 }) {
-  const mediaPayload = parseMediaPayload(raw);
-  const [mediaUrl, setMediaUrl] = React.useState<string>("");
+  const mediaPayloadFiles = React.useMemo(() => parseMediaPayloadFiles(raw), [raw]);
+  const [resolvedFiles, setResolvedFiles] = React.useState<Array<{ payload: MediaPayloadFile; url: string }>>([]);
   const [mediaError, setMediaError] = React.useState<string>("");
 
   React.useEffect(() => {
     let active = true;
-    let objectUrlToRevoke = "";
+    const urlsToRevoke: string[] = [];
 
     async function resolveMedia() {
-      if (!mediaPayload || !chatId) {
+      if (!mediaPayloadFiles || !chatId) {
         return;
       }
       try {
-        const response = await fetch(mediaPayload.media_url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!response.ok) {
-          throw new Error(`Не удалось загрузить медиа (${response.status})`);
-        }
-        const encryptedBytes = new Uint8Array(await response.arrayBuffer());
         const chatKey = await ensureChatKey(chatId);
-        const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, mediaPayload.file_nonce, chatKey);
-        const safeBytes = new Uint8Array(decryptedBytes.byteLength);
-        safeBytes.set(decryptedBytes);
-        const blob = new Blob([safeBytes.buffer], { type: mediaPayload.file_mime || "application/octet-stream" });
-        objectUrlToRevoke = URL.createObjectURL(blob);
+        const nextFiles: Array<{ payload: MediaPayloadFile; url: string }> = [];
+        for (const payload of mediaPayloadFiles) {
+          const response = await fetch(payload.media_url, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) {
+            throw new Error(`Не удалось загрузить медиа (${response.status})`);
+          }
+          const encryptedBytes = new Uint8Array(await response.arrayBuffer());
+          const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, payload.file_nonce, chatKey);
+          const safeBytes = new Uint8Array(decryptedBytes.byteLength);
+          safeBytes.set(decryptedBytes);
+          const blob = new Blob([safeBytes.buffer], { type: payload.file_mime || "application/octet-stream" });
+          const fileUrl = URL.createObjectURL(blob);
+          urlsToRevoke.push(fileUrl);
+          nextFiles.push({ payload, url: fileUrl });
+        }
         if (active) {
-          setMediaUrl(objectUrlToRevoke);
+          setResolvedFiles(nextFiles);
           setMediaError("");
           onMediaReady();
         }
       } catch (error) {
         if (active) {
           setMediaError(error instanceof Error ? error.message : "Не удалось показать медиа");
-          setMediaUrl("");
+          setResolvedFiles([]);
         }
       }
     }
@@ -1750,71 +1977,92 @@ function MediaMessageView({
     void resolveMedia();
     return () => {
       active = false;
-      if (objectUrlToRevoke) {
-        URL.revokeObjectURL(objectUrlToRevoke);
+      for (const url of urlsToRevoke) {
+        URL.revokeObjectURL(url);
       }
     };
-  }, [chatId, mediaPayload?.file_mime, mediaPayload?.file_nonce, mediaPayload?.media_url, onMediaReady, token]);
+  }, [chatId, mediaPayloadFiles, onMediaReady, token]);
 
-  if (!mediaPayload) {
+  if (!mediaPayloadFiles) {
     return <p>{raw || "..."}</p>;
   }
-
-  const isImage = mediaPayload.file_mime.startsWith("image/");
-  const isVideo = mediaPayload.file_mime.startsWith("video/");
-  const isAudio = mediaPayload.file_mime.startsWith("audio/");
 
   return (
     <div className="media-message">
       {mediaError ? <p>{mediaError}</p> : null}
-      {!mediaError && !mediaUrl ? <p>Загружаем медиа...</p> : null}
-      {mediaUrl && isImage ? (
-        <button className="media-inline-trigger" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} type="button">
-          <img alt={mediaPayload.file_name} className="media-inline-preview" src={mediaUrl} />
-        </button>
-      ) : null}
-      {mediaUrl && isVideo ? <video className="media-inline-preview" controls src={mediaUrl} /> : null}
-      {mediaUrl && isAudio ? <audio className="media-inline-audio" controls src={mediaUrl} /> : null}
-      {mediaUrl && !isImage && !isVideo && !isAudio ? (
-        <span className="media-file-link" onClick={() => onPreview(mediaUrl, mediaPayload.file_mime)} role="button" tabIndex={0}>
-          Вложение
-        </span>
-      ) : null}
+      {!mediaError && resolvedFiles.length === 0 ? <p>Загружаем медиа...</p> : null}
+      {resolvedFiles.map(({ payload, url }) => {
+        const isImage = payload.file_mime.startsWith("image/");
+        const isVideo = payload.file_mime.startsWith("video/");
+        const isAudio = payload.file_mime.startsWith("audio/");
+        return (
+          <div className="media-item" key={payload.media_id || `${payload.file_name}-${payload.file_nonce}`}>
+            {isImage ? (
+              <button className="media-inline-trigger" onClick={() => onPreview(url, payload.file_mime)} type="button">
+                <img alt={payload.file_name} className="media-inline-preview" src={url} />
+              </button>
+            ) : null}
+            {isVideo ? <video className="media-inline-preview" controls src={url} /> : null}
+            {isAudio ? <audio className="media-inline-audio" controls src={url} /> : null}
+            {!isImage && !isVideo && !isAudio ? (
+              <a className="media-file-link" download={payload.file_name} href={url} rel="noreferrer" target="_blank">
+                {payload.file_name}
+              </a>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-type MediaPayload = {
-  kind: "media";
-  media_id: string;
-  media_url: string;
-  file_name: string;
-  file_size: number;
-  file_mime: string;
-  file_nonce: string;
-};
-
-function parseMediaPayload(raw: string): MediaPayload | null {
+function parseMediaPayloadFiles(raw: string): MediaPayloadFile[] | null {
   if (!raw) {
     return null;
   }
   try {
-    const payload = JSON.parse(raw) as Partial<MediaPayload>;
-    if (payload.kind !== "media" || typeof payload.media_url !== "string" || typeof payload.file_name !== "string") {
+    const payload = JSON.parse(raw) as
+      | { kind?: string; files?: Partial<MediaPayloadFile>[] }
+      | Partial<MediaPayloadFile>;
+    if (payload && typeof payload === "object" && "kind" in payload && payload.kind === "media_batch" && Array.isArray(payload.files)) {
+      const files = payload.files
+        .map((item) => normalizeMediaPayloadFile(item))
+        .filter((item): item is MediaPayloadFile => item !== null);
+      return files.length > 0 ? files : null;
+    }
+    const legacy = normalizeMediaPayloadFile(payload as Partial<MediaPayloadFile>);
+    if (!legacy) {
       return null;
     }
-    return {
-      kind: "media",
-      media_id: payload.media_id ?? "",
-      media_url: payload.media_url,
-      file_name: payload.file_name,
-      file_size: typeof payload.file_size === "number" ? payload.file_size : 0,
-      file_mime: payload.file_mime ?? "application/octet-stream",
-      file_nonce: payload.file_nonce ?? "",
-    };
+    return [legacy];
   } catch {
     return null;
   }
+}
+
+function normalizeMediaPayloadFile(payload: Partial<MediaPayloadFile> | null | undefined): MediaPayloadFile | null {
+  if (!payload || typeof payload.media_url !== "string" || typeof payload.file_name !== "string") {
+    return null;
+  }
+  return {
+    media_id: payload.media_id ?? "",
+    media_url: payload.media_url,
+    file_name: payload.file_name,
+    file_size: typeof payload.file_size === "number" ? payload.file_size : 0,
+    file_mime: payload.file_mime ?? "application/octet-stream",
+    file_nonce: payload.file_nonce ?? "",
+  };
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) {
+    return [items];
+  }
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function loadStoredThemeId(): string {
