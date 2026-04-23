@@ -1,5 +1,10 @@
 import { apiGet, apiPatch } from "./client";
 
+export type ProfilePhoto = {
+  url: string;
+  caption: string | null;
+};
+
 export type CurrentUser = {
   id: string;
   email: string;
@@ -7,7 +12,7 @@ export type CurrentUser = {
   display_name: string | null;
   nickname: string | null;
   profile_status: string | null;
-  profile_photos: string[];
+  profile_photos: ProfilePhoto[];
   profile_banner_url: string | null;
   profile_background_url: string | null;
   avatar_ring_style: string | null;
@@ -26,6 +31,8 @@ export type UserPublic = {
   nickname: string | null;
   profile_status: string | null;
   profile_banner_url: string | null;
+  profile_background_url: string | null;
+  profile_photos: string | null;
   avatar_ring_style: string | null;
   avatar_url: string | null;
   status: string;
@@ -41,7 +48,7 @@ export type CurrentUserUpdatePayload = {
   profile_banner_url?: string | null;
   profile_background_url?: string | null;
   avatar_ring_style?: string | null;
-  profile_photos?: string[] | null;
+  profile_photos?: ProfilePhoto[] | null;
 };
 
 export async function getMe(token: string): Promise<CurrentUser> {

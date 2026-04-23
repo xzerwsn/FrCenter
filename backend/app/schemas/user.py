@@ -3,6 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+class ProfilePhotoItem(BaseModel):
+    url: str = Field(min_length=1)
+    caption: str | None = Field(default=None, max_length=240)
+
+
 class UserMeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -12,7 +17,7 @@ class UserMeResponse(BaseModel):
     display_name: str | None
     nickname: str | None
     profile_status: str | None
-    profile_photos: list[str]
+    profile_photos: list[ProfilePhotoItem]
     profile_banner_url: str | None
     profile_background_url: str | None
     avatar_ring_style: str | None
@@ -33,6 +38,8 @@ class UserPublicResponse(BaseModel):
     nickname: str | None
     profile_status: str | None
     profile_banner_url: str | None
+    profile_background_url: str | None
+    profile_photos: str | None
     avatar_ring_style: str | None
     avatar_url: str | None
     status: str
@@ -48,4 +55,4 @@ class UserMeUpdateRequest(BaseModel):
     profile_banner_url: str | None = None
     profile_background_url: str | None = None
     avatar_ring_style: str | None = Field(default=None, max_length=32)
-    profile_photos: list[str] | None = Field(default=None, max_length=30)
+    profile_photos: list[ProfilePhotoItem] | None = Field(default=None, max_length=30)

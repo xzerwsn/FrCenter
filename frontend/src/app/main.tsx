@@ -39,7 +39,7 @@ import { registerDevice } from "../api/devices";
 import { addFriendByCode, createInviteCode, listFriends, searchUsers, sendFriendRequest } from "../api/friends";
 import { uploadEncryptedMedia } from "../api/media";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
-import { getMe, updateMe, type CurrentUser, type UserPublic } from "../api/users";
+import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import {
   createSharedMessageKey,
@@ -553,18 +553,21 @@ function ProfilePanel({
   const isOwnProfile = "email" in profile && profile.id === sessionUser.id;
   const [displayName, setDisplayName] = React.useState(sessionUser.display_name ?? "");
   const [username, setUsername] = React.useState(sessionUser.username);
-  const [nickname, setNickname] = React.useState(sessionUser.nickname ?? "");
-  const [profileStatusText, setProfileStatusText] = React.useState(sessionUser.profile_status ?? "");
   const [avatarUrl, setAvatarUrl] = React.useState(sessionUser.avatar_url ?? "");
   const [bannerUrl, setBannerUrl] = React.useState(sessionUser.profile_banner_url ?? "");
   const [backgroundUrl, setBackgroundUrl] = React.useState(sessionUser.profile_background_url ?? "");
   const [ringStyle, setRingStyle] = React.useState(sessionUser.avatar_ring_style ?? "holo");
-  const [profilePhotos, setProfilePhotos] = React.useState<string[]>(sessionUser.profile_photos ?? []);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [publishOpen, setPublishOpen] = React.useState(false);
+  const [publishImageUrl, setPublishImageUrl] = React.useState("");
+  const [publishCaption, setPublishCaption] = React.useState("");
   const [statusText, setStatusText] = React.useState("");
   const avatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const bannerInputRef = React.useRef<HTMLInputElement | null>(null);
   const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
-  const galleryInputRef = React.useRef<HTMLInputElement | null>(null);
+  const publishInputRef = React.useRef<HTMLInputElement | null>(null);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     if (!isOwnProfile) {
@@ -572,25 +575,47 @@ function ProfilePanel({
     }
     setDisplayName(sessionUser.display_name ?? "");
     setUsername(sessionUser.username);
-    setNickname(sessionUser.nickname ?? "");
-    setProfileStatusText(sessionUser.profile_status ?? "");
     setAvatarUrl(sessionUser.avatar_url ?? "");
     setBannerUrl(sessionUser.profile_banner_url ?? "");
     setBackgroundUrl(sessionUser.profile_background_url ?? "");
     setRingStyle(sessionUser.avatar_ring_style ?? "holo");
-    setProfilePhotos(sessionUser.profile_photos ?? []);
   }, [
     isOwnProfile,
     sessionUser.avatar_ring_style,
     sessionUser.avatar_url,
     sessionUser.display_name,
-    sessionUser.nickname,
     sessionUser.profile_background_url,
     sessionUser.profile_banner_url,
-    sessionUser.profile_photos,
-    sessionUser.profile_status,
     sessionUser.username,
   ]);
+
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!menuRef.current) {
+        return;
+      }
+      const targetNode = event.target as Node;
+      if (!menuRef.current.contains(targetNode)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const publicProfilePhotos = React.useMemo(() => parseProfilePhotosFromPublic(profile), [profile]);
+  const profilePhotos = isOwnProfile ? sessionUser.profile_photos : publicProfilePhotos;
+  const cardAvatar = isOwnProfile ? avatarUrl || sessionUser.avatar_url : profile.avatar_url;
+  const cardBanner = isOwnProfile ? bannerUrl || sessionUser.profile_banner_url : profile.profile_banner_url;
+  const cardBackground = isOwnProfile ? backgroundUrl || sessionUser.profile_background_url : profile.profile_background_url;
+  const cardName = isOwnProfile
+    ? displayName || sessionUser.display_name || sessionUser.username
+    : profile.display_name || profile.username;
+  const cardUsername = isOwnProfile ? username || sessionUser.username : profile.username;
+  const cardStatus = isOwnProfile
+    ? sessionUser.profile_status || humanizeStatus(status)
+    : profile.profile_status || humanizeStatus(status);
+  const cardRing = isOwnProfile ? ringStyle || "holo" : profile.avatar_ring_style || "holo";
 
   async function handleSingleImagePick(
     file: File | null,
@@ -608,19 +633,19 @@ function ProfilePanel({
     }
   }
 
-  async function handleProfileGalleryPick(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) {
+  async function handlePublishImage(file: File | null) {
+    if (!file) {
+      setPublishImageUrl("");
       return;
     }
     try {
-      const next = await Promise.all(Array.from(fileList).map((file) => fileToDataUrl(file)));
-      setProfilePhotos((current) => [...current, ...next].slice(0, 30));
+      setPublishImageUrl(await fileToDataUrl(file));
     } catch {
-      setStatusText("Не удалось загрузить фотографии профиля");
+      setStatusText("Не удалось загрузить фото публикации");
     }
   }
 
-  async function handleSaveProfile(event: React.FormEvent) {
+  async function handleSaveProfileSettings(event: React.FormEvent) {
     event.preventDefault();
     if (!isOwnProfile) {
       return;
@@ -630,18 +655,47 @@ function ProfilePanel({
       const updated = await updateMe(token, {
         display_name: displayName.trim() || null,
         username: username.trim() || sessionUser.username,
-        nickname: nickname.trim() || null,
-        profile_status: profileStatusText.trim() || null,
         avatar_url: avatarUrl || null,
         profile_banner_url: bannerUrl || null,
         profile_background_url: backgroundUrl || null,
         avatar_ring_style: ringStyle || null,
-        profile_photos: profilePhotos,
       });
       onSessionUserUpdate(updated);
-      setStatusText("Профиль обновлен");
+      setSettingsOpen(false);
+      setStatusText("Настройки профиля обновлены");
     } catch (error) {
       setStatusText(error instanceof Error ? error.message : "Не удалось обновить профиль");
+    }
+  }
+
+  async function handleCreatePublication(event: React.FormEvent) {
+    event.preventDefault();
+    if (!isOwnProfile) {
+      return;
+    }
+    if (!publishImageUrl) {
+      setStatusText("Выбери изображение для публикации");
+      return;
+    }
+    setStatusText("Публикуем...");
+    try {
+      const nextPhotos: ProfilePhoto[] = [
+        {
+          url: publishImageUrl,
+          caption: publishCaption.trim() || null,
+        },
+        ...sessionUser.profile_photos,
+      ].slice(0, 30);
+      const updated = await updateMe(token, {
+        profile_photos: nextPhotos,
+      });
+      onSessionUserUpdate(updated);
+      setPublishImageUrl("");
+      setPublishCaption("");
+      setPublishOpen(false);
+      setStatusText("Публикация добавлена");
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "Не удалось создать публикацию");
     }
   }
 
@@ -651,18 +705,47 @@ function ProfilePanel({
         <h2>Профиль</h2>
         <div
           className="profile-header-card"
-          style={backgroundUrl ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 74%), rgb(19 17 29 / 82%)), url("${backgroundUrl}")` } : undefined}
+          style={cardBackground ? { backgroundImage: `linear-gradient(rgb(19 17 29 / 76%), rgb(19 17 29 / 84%)), url("${cardBackground}")` } : undefined}
         >
-          {bannerUrl ? <img alt="Баннер профиля" className="profile-banner-image" src={bannerUrl} /> : null}
-          <div className={`profile-avatar-ring ring-${ringStyle || "holo"}`}>
+          {isOwnProfile ? (
+            <div className="profile-menu-wrap" ref={menuRef}>
+              <button className="profile-menu-button" onClick={() => setMenuOpen((open) => !open)} type="button">
+                <MoreHorizontal size={18} />
+              </button>
+              {menuOpen ? (
+                <div className="profile-menu-dropdown">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setSettingsOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Настройки
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setPublishOpen(true);
+                    }}
+                    type="button"
+                  >
+                    Публикация
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="profile-banner-strip">{cardBanner ? <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} /> : null}</div>
+          <div className={`profile-avatar-ring ring-${cardRing}`}>
             <div className="profile-avatar-core">
-              {avatarUrl ? <img alt={profile.username} src={avatarUrl} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
+              {cardAvatar ? <img alt={profile.username} src={cardAvatar} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
             </div>
           </div>
           <div className="profile-main-meta">
-            <strong>{displayName || profile.display_name || profile.username}</strong>
-            <span>@{username || profile.username}</span>
-            <span>{profileStatusText || profile.profile_status || humanizeStatus(status)}</span>
+            <strong>{cardName}</strong>
+            <span>@{cardUsername}</span>
+            <span>{cardStatus}</span>
           </div>
         </div>
         <div className="result-row">
@@ -673,112 +756,155 @@ function ProfilePanel({
         </div>
         <p className="form-status">Текущая игра: {game}</p>
         {"email" in profile ? <p className="form-status">Email: {profile.email}</p> : null}
-        <p className="form-status">ID: {profile.id}</p>
+        {statusText ? <p className="form-status">{statusText}</p> : null}
       </div>
       <div className="profile-settings-panel">
-        {isOwnProfile ? (
-          <form className="auth-form profile-edit-form" onSubmit={handleSaveProfile}>
-            <label>
-              Имя
-              <input maxLength={120} onChange={(event) => setDisplayName(event.target.value)} value={displayName} />
-            </label>
-            <label>
-              Никнейм
-              <input maxLength={32} minLength={3} onChange={(event) => setUsername(event.target.value)} value={username} />
-            </label>
-            <label>
-              @Тег
-              <input maxLength={32} onChange={(event) => setNickname(event.target.value)} value={nickname} />
-            </label>
-            <label>
-              Статус
-              <input maxLength={160} onChange={(event) => setProfileStatusText(event.target.value)} value={profileStatusText} />
-            </label>
-            <label>
-              Стиль обводки аватара
-              <select onChange={(event) => setRingStyle(event.target.value)} value={ringStyle}>
-                <option value="holo">Holo</option>
-                <option value="neon">Neon</option>
-                <option value="soft">Soft</option>
-              </select>
-            </label>
-            <div className="create-chat-media">
-              <button onClick={() => avatarInputRef.current?.click()} type="button">
-                Аватар
-              </button>
-              <button onClick={() => bannerInputRef.current?.click()} type="button">
-                Баннер
-              </button>
-              <button onClick={() => backgroundInputRef.current?.click()} type="button">
-                Фон профиля
-              </button>
-              <button onClick={() => galleryInputRef.current?.click()} type="button">
-                Фото профиля
-              </button>
-            </div>
-            <input
-              accept="image/*"
-              className="visually-hidden"
-              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setAvatarUrl, "Не удалось загрузить аватар")}
-              ref={avatarInputRef}
-              type="file"
-            />
-            <input
-              accept="image/*"
-              className="visually-hidden"
-              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBannerUrl, "Не удалось загрузить баннер")}
-              ref={bannerInputRef}
-              type="file"
-            />
-            <input
-              accept="image/*"
-              className="visually-hidden"
-              onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBackgroundUrl, "Не удалось загрузить фон")}
-              ref={backgroundInputRef}
-              type="file"
-            />
-            <input
-              accept="image/*"
-              className="visually-hidden"
-              multiple
-              onChange={(event) => void handleProfileGalleryPick(event.target.files)}
-              ref={galleryInputRef}
-              type="file"
-            />
-            {profilePhotos.length > 0 ? (
-              <div className="profile-photo-grid">
-                {profilePhotos.map((photo, index) => (
-                  <div className="profile-photo-card" key={`${photo.slice(0, 24)}-${index}`}>
-                    <img alt={`Фото ${index + 1}`} src={photo} />
-                    <button onClick={() => setProfilePhotos((current) => current.filter((_, item) => item !== index))} type="button">
-                      Удалить
-                    </button>
-                  </div>
-                ))}
+        <h2>Публикации</h2>
+        {profilePhotos.length > 0 ? (
+          <div className="profile-photo-grid">
+            {profilePhotos.map((photo, index) => (
+              <div className="profile-photo-card" key={`${photo.url.slice(0, 24)}-${index}`}>
+                <img alt={`Фото ${index + 1}`} src={photo.url} />
+                <p className="form-status">{photo.caption || "Без подписи"}</p>
               </div>
-            ) : null}
-            <button type="submit">Сохранить профиль</button>
-            {statusText ? <p className="form-status">{statusText}</p> : null}
-          </form>
-        ) : (
-          <div className="result-list">
-            <div className="result-row">
-              <span>Имя</span>
-              <span>{profile.display_name || profile.username}</span>
-            </div>
-            <div className="result-row">
-              <span>Ник</span>
-              <span>{profile.nickname ? `@${profile.nickname}` : "не указан"}</span>
-            </div>
-            <div className="result-row">
-              <span>Статус профиля</span>
-              <span>{profile.profile_status || humanizeStatus(profile.status)}</span>
-            </div>
+            ))}
           </div>
+        ) : (
+          <p className="form-status">Публикаций пока нет</p>
         )}
       </div>
+
+      {isOwnProfile && settingsOpen ? (
+        <div className="create-chat-modal-overlay" onClick={() => setSettingsOpen(false)}>
+          <div className="create-chat-modal profile-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="create-chat-modal-header">
+              <h3>Настройки профиля</h3>
+              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setSettingsOpen(false)} type="button">
+                <X size={16} />
+              </button>
+            </div>
+            <form className="auth-form profile-edit-form" onSubmit={handleSaveProfileSettings}>
+              <label>
+                Имя
+                <input maxLength={120} onChange={(event) => setDisplayName(event.target.value)} value={displayName} />
+              </label>
+              <label>
+                Никнейм
+                <input maxLength={32} minLength={3} onChange={(event) => setUsername(event.target.value)} value={username} />
+              </label>
+              <label>
+                Стиль обводки аватара
+                <select onChange={(event) => setRingStyle(event.target.value)} value={ringStyle}>
+                  <option value="holo">Holo</option>
+                  <option value="neon">Neon</option>
+                  <option value="soft">Soft</option>
+                </select>
+              </label>
+              <div className="create-chat-media">
+                <button onClick={() => avatarInputRef.current?.click()} type="button">
+                  Аватар
+                </button>
+                <button onClick={() => bannerInputRef.current?.click()} type="button">
+                  Баннер
+                </button>
+                <button onClick={() => backgroundInputRef.current?.click()} type="button">
+                  Фон профиля
+                </button>
+              </div>
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setAvatarUrl, "Не удалось загрузить аватар")}
+                ref={avatarInputRef}
+                type="file"
+              />
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBannerUrl, "Не удалось загрузить баннер")}
+                ref={bannerInputRef}
+                type="file"
+              />
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBackgroundUrl, "Не удалось загрузить фон")}
+                ref={backgroundInputRef}
+                type="file"
+              />
+              <button type="submit">Сохранить</button>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isOwnProfile && publishOpen ? (
+        <div className="create-chat-modal-overlay" onClick={() => setPublishOpen(false)}>
+          <div className="create-chat-modal profile-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="create-chat-modal-header">
+              <h3>Новая публикация</h3>
+              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setPublishOpen(false)} type="button">
+                <X size={16} />
+              </button>
+            </div>
+            <form className="auth-form profile-edit-form" onSubmit={handleCreatePublication}>
+              <div className="create-chat-media">
+                <button onClick={() => publishInputRef.current?.click()} type="button">
+                  Выбрать фото
+                </button>
+              </div>
+              <input
+                accept="image/*"
+                className="visually-hidden"
+                onChange={(event) => void handlePublishImage(event.target.files?.[0] ?? null)}
+                ref={publishInputRef}
+                type="file"
+              />
+              {publishImageUrl ? (
+                <div className="profile-photo-card">
+                  <img alt="Публикация" src={publishImageUrl} />
+                </div>
+              ) : null}
+              <label>
+                Подпись
+                <input maxLength={240} onChange={(event) => setPublishCaption(event.target.value)} value={publishCaption} />
+              </label>
+              <button type="submit">Опубликовать</button>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): ProfilePhoto[] {
+  if ("email" in profile) {
+    return profile.profile_photos ?? [];
+  }
+  const raw = profile.profile_photos;
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((item) => {
+        if (typeof item === "string") {
+          return { url: item, caption: null } as ProfilePhoto;
+        }
+        if (item && typeof item === "object" && typeof item.url === "string") {
+          return { url: item.url, caption: typeof item.caption === "string" ? item.caption : null } as ProfilePhoto;
+        }
+        return null;
+      })
+      .filter((item): item is ProfilePhoto => item !== null);
+  } catch {
+    return [];
+  }
 }
 
 function HomePanel({ friends }: { friends: UserPublic[] }) {
