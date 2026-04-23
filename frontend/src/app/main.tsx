@@ -763,17 +763,16 @@ function ProfilePanel({
                   <span>{cardStatus}</span>
                 </div>
               </div>
-            </div>
-
-            <div className="profile-info-card">
-              <div className="profile-info-line profile-info-head">
-                <span className="profile-info-name">{cardUsername}</span>
-                <span className={`status-pill status-${normalizeStatus(status)}`}>{humanizeStatus(status)}</span>
-              </div>
-              <div className="profile-info-list">
-                <p>Текущая игра: {game}</p>
-                {"email" in profile ? <p>Email: {profile.email}</p> : null}
-                {statusText ? <p>{statusText}</p> : null}
+              <div className="profile-info-card">
+                <div className="profile-info-line profile-info-head">
+                  <span className="profile-info-name">{cardUsername}</span>
+                  <span className={`status-pill status-${normalizeStatus(status)}`}>{humanizeStatus(status)}</span>
+                </div>
+                <div className="profile-info-list">
+                  <p>Текущая игра: {game}</p>
+                  {"email" in profile ? <p>Email: {profile.email}</p> : null}
+                  {statusText ? <p>{statusText}</p> : null}
+                </div>
               </div>
             </div>
 
