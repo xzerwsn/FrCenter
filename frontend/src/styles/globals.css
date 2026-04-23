@@ -130,7 +130,7 @@ input {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
   margin-top: 24px;
 }
@@ -150,6 +150,28 @@ input {
 .grid p {
   margin: 0;
   color: #e7a8ae;
+}
+
+.grid small {
+  display: block;
+  margin-top: 12px;
+  color: #ffe5c4;
+  overflow-wrap: anywhere;
+}
+
+.inline-action {
+  margin-top: 16px;
+  border: 0;
+  border-radius: 16px;
+  padding: 10px 14px;
+  color: #3d0d18;
+  background: #fff4b5;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.inline-action:hover {
+  background: #ffe57a;
 }
 
 .friend {
@@ -193,5 +215,11 @@ input {
 
   .grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

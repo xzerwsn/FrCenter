@@ -2,11 +2,23 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { Gamepad2, Home, MessageCircle, Newspaper, Settings, Users } from "lucide-react";
 
+import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import "../styles/globals.css";
 
 const friends = ["Nikitin", "Vega", "Mira", "Zero", "RiotKid"];
 
 function App() {
+  const [deviceStatus, setDeviceStatus] = React.useState("Ключи устройства еще не созданы");
+  const [deviceFingerprint, setDeviceFingerprint] = React.useState<string | null>(null);
+
+  async function handleCreateDeviceKeys() {
+    setDeviceStatus("Генерируем ключи локально...");
+    const bundle = await createDeviceKeyBundle("Windows Desktop", "demo-cloud-password");
+    const fingerprint = await fingerprintPublicKey(bundle.publicKey);
+    setDeviceFingerprint(fingerprint);
+    setDeviceStatus("Пара ключей создана, приватный ключ зашифрован облачным паролем");
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -45,6 +57,14 @@ function App() {
           <article>
             <h2>Статистика</h2>
             <p>Steam и Riot появятся первыми, Epic и EA позже.</p>
+          </article>
+          <article>
+            <h2>E2EE</h2>
+            <p>{deviceStatus}</p>
+            {deviceFingerprint ? <small>Fingerprint: {deviceFingerprint}</small> : null}
+            <button className="inline-action" onClick={handleCreateDeviceKeys} type="button">
+              Создать ключи
+            </button>
           </article>
         </section>
       </section>

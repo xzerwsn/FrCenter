@@ -10,12 +10,18 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.7",
-    "typescript": "^5.7.2",
+    "libsodium-wrappers": "^0.7.15",
+    "libsodium-wrappers-sumo": "^0.8.4",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0",
-    "libsodium-wrappers": "^0.7.15"
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.14",
+    "@types/libsodium-wrappers-sumo": "^0.7.8",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  }
 }
