@@ -115,6 +115,11 @@ async def list_messages(db: AsyncSession, current_user: User, chat_id: str) -> l
     return list(result.scalars().all())
 
 
+async def get_active_member_ids(db: AsyncSession, chat_id: str) -> list[str]:
+    members = await _get_active_members(db, chat_id)
+    return [member.user_id for member in members]
+
+
 async def send_message(
     db: AsyncSession,
     current_user: User,

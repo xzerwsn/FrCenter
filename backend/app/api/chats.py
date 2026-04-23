@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.websocket import connection_manager
 from app.db.session import get_db
 from app.models.chat import Chat, Message
 from app.models.user import User
@@ -21,6 +22,7 @@ from app.services.chat_service import (
     create_direct_chat,
     create_group_chat,
     get_chat,
+    get_active_member_ids,
     list_chats as list_user_chats,
     list_messages,
     send_message,
@@ -102,7 +104,7 @@ async def create_message(
     db: AsyncSession = Depends(get_db),
 ) -> Message:
     try:
-        return await send_message(
+        message = await send_message(
             db,
             current_user,
             chat_id,
@@ -111,5 +113,16 @@ async def create_message(
             payload.message_type,
             payload.encrypted_message_keys,
         )
+        member_ids = await get_active_member_ids(db, chat_id)
+        message_payload = MessageResponse.model_validate(message).model_dump(mode="json")
+        await connection_manager.broadcast_to_users(
+            member_ids,
+            {
+                "type": "message.new",
+                "chat_id": chat_id,
+                "message": message_payload,
+            },
+        )
+        return message
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Чат не найден") from exc
