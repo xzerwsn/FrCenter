@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   Bell,
   ChevronDown,
+  ChevronLeft,
   Gamepad2,
   Home,
   LogOut,
@@ -532,6 +533,7 @@ function Dashboard({
 
         {section === "profile" ? (
           <ProfilePanel
+            onLogout={onLogout}
             token={session.token}
             profile={selectedProfile && selectedProfile.id !== session.user.id ? selectedProfile : session.user}
             sessionUser={session.user}
@@ -566,11 +568,13 @@ function Dashboard({
 }
 
 function ProfilePanel({
+  onLogout,
   token,
   profile,
   sessionUser,
   onSessionUserUpdate,
 }: {
+  onLogout: () => void;
   token: string;
   profile: UserPublic | CurrentUser;
   sessionUser: CurrentUser;
@@ -763,21 +767,30 @@ function ProfilePanel({
                       >
                         Настройки
                       </button>
-                      <button
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setEditingPublicationIndex(null);
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setEditingPublicationIndex(null);
                           setPublishImageUrl("");
                           setPublishCaption("");
                           setPublishOpen(true);
                         }}
                         type="button"
-                      >
-                        Публикация
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+                    >
+                      Публикация
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onLogout();
+                      }}
+                      type="button"
+                    >
+                      Выйти
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               ) : null}
               <div className="profile-banner-strip">
                 {cardBanner ? (
@@ -1374,6 +1387,13 @@ function ChatsPanel({
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
   const [messagesLoading, setMessagesLoading] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.matchMedia("(max-width: 820px)").matches;
+  });
+  const [mobileChatOpen, setMobileChatOpen] = React.useState(false);
 
   const createParticipantsDropdownRef = React.useRef<HTMLDivElement | null>(null);
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -1447,6 +1467,23 @@ function ChatsPanel({
   }, [token]);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const mediaQuery = window.matchMedia("(max-width: 820px)");
+    const updateMatch = () => setIsMobile(mediaQuery.matches);
+    updateMatch();
+    mediaQuery.addEventListener("change", updateMatch);
+    return () => mediaQuery.removeEventListener("change", updateMatch);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isMobile) {
+      setMobileChatOpen(false);
+    }
+  }, [isMobile]);
+
+  React.useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
 
@@ -1455,13 +1492,20 @@ function ChatsPanel({
       if (selectedChatId) {
         setSelectedChatId("");
       }
+      if (isMobile) {
+        setMobileChatOpen(false);
+      }
       return;
     }
     if (orderedChats.some((chat) => chat.id === selectedChatId)) {
       return;
     }
+    if (isMobile) {
+      setMobileChatOpen(false);
+      return;
+    }
     setSelectedChatId(orderedChats[0].id);
-  }, [orderedChats, selectedChatId]);
+  }, [isMobile, orderedChats, selectedChatId]);
 
   React.useEffect(() => {
     if (!selectedChatId) {
@@ -2119,8 +2163,8 @@ function ChatsPanel({
   }
 
   return (
-    <section className="chat-band">
-      <div className="chat-list-pane">
+    <section className={`chat-band ${isMobile ? "mobile-mode" : ""} ${mobileChatOpen ? "mobile-chat-open" : ""}`}>
+      <div className={`chat-list-pane ${isMobile && mobileChatOpen ? "mobile-hidden" : ""}`}>
         <div className="chat-list-header">
           <h2>Чаты</h2>
           <button
@@ -2240,7 +2284,16 @@ function ChatsPanel({
             const isPinned = pinnedChatSet.has(chat.id);
             return (
               <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
-                <button className="chat-row-main" onClick={() => setSelectedChatId(chat.id)} type="button">
+                <button
+                  className="chat-row-main"
+                  onClick={() => {
+                    setSelectedChatId(chat.id);
+                    if (isMobile) {
+                      setMobileChatOpen(true);
+                    }
+                  }}
+                  type="button"
+                >
                   <div className="chat-row-avatar">
                     {chatMeta.avatarUrl ? (
                       <img alt={chatMeta.title} src={chatMeta.avatarUrl} />
@@ -2279,7 +2332,7 @@ function ChatsPanel({
       </div>
 
       <div
-        className={`chat-pane ${composerDragActive ? "drag-active" : ""}`}
+        className={`chat-pane ${composerDragActive ? "drag-active" : ""} ${isMobile && !mobileChatOpen ? "mobile-hidden" : ""}`}
         onDragLeave={handleChatPaneDragLeave}
         onDragOver={handleChatPaneDragOver}
         onDrop={handleChatPaneDrop}
@@ -2289,6 +2342,16 @@ function ChatsPanel({
         {selectedChatMeta ? (
           <div className="chat-pane-header">
             <div className="chat-head-left">
+              {isMobile ? (
+                <button
+                  aria-label="Назад к списку чатов"
+                  className="chat-back-button mobile-only"
+                  onClick={() => setMobileChatOpen(false)}
+                  type="button"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+              ) : null}
               <div className="chat-pane-avatar">
                 {selectedChatMeta.avatarUrl ? <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} /> : selectedChatMeta.initials}
               </div>
