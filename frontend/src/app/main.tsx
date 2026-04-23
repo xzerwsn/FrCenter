@@ -776,9 +776,8 @@ function ProfilePanel({
                 {statusText ? <p>{statusText}</p> : null}
               </div>
             </div>
-          </div>
 
-          <div className="profile-publications-panel">
+            <div className="profile-publications-panel">
             <div className="profile-publications-head">
               <h2>Публикации</h2>
               <span>{profilePhotos.length}</span>
@@ -812,6 +811,7 @@ function ProfilePanel({
             ) : (
               <p className="form-status">Публикаций пока нет</p>
             )}
+            </div>
           </div>
         </div>
       </div>

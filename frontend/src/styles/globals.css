@@ -1295,7 +1295,7 @@ button:disabled {
 
 .profile-layout-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -1312,6 +1312,7 @@ button:disabled {
   background: color-mix(in srgb, var(--color-surface-deep) 80%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
   overflow: hidden;
+  min-height: 420px;
 }
 
 .profile-menu-wrap {
@@ -1356,7 +1357,7 @@ button:disabled {
 
 .profile-banner-strip {
   width: 100%;
-  height: 182px;
+  height: 230px;
   border-radius: 12px;
   overflow: hidden;
   background: color-mix(in srgb, var(--color-surface-deep) 70%, transparent);
@@ -1448,6 +1449,10 @@ button:disabled {
   min-height: 260px;
 }
 
+.profile-publications-panel {
+  width: 100%;
+}
+
 .profile-info-head {
   justify-content: space-between;
   align-items: center;
@@ -1502,8 +1507,10 @@ button:disabled {
 
 .profile-photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 180px));
   gap: 10px;
+  align-items: start;
+  justify-content: start;
 }
 
 .profile-photo-card {
@@ -1652,6 +1659,18 @@ button:disabled {
   .profile-identity-row {
     align-items: center;
     margin-top: -28px;
+  }
+
+  .profile-header-card {
+    min-height: auto;
+  }
+
+  .profile-banner-strip {
+    height: 180px;
+  }
+
+  .profile-photo-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }
 
