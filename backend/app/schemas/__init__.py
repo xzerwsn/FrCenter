@@ -15,6 +15,13 @@ from app.schemas.chat import (
     MessageResponse as ChatMessageResponse,
     MessageSendRequest,
 )
+from app.schemas.device import (
+    DeviceListResponse,
+    DevicePublicKeyListResponse,
+    DevicePublicKeyResponse,
+    DeviceRegisterRequest,
+    DeviceResponse,
+)
 from app.schemas.friend import (
     AddByInviteCodeRequest,
     FriendListResponse,
@@ -38,6 +45,11 @@ __all__ = [
     "ChatMessageResponse",
     "ChatResponse",
     "DirectChatCreate",
+    "DeviceListResponse",
+    "DevicePublicKeyListResponse",
+    "DevicePublicKeyResponse",
+    "DeviceRegisterRequest",
+    "DeviceResponse",
     "FriendListResponse",
     "FriendRequestCreate",
     "FriendRequestResponse",
