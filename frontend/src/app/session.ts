@@ -9,22 +9,44 @@ export type Session = {
 };
 
 export function saveSession(session: Session): void {
-  localStorage.setItem(TOKEN_KEY, session.token);
-  localStorage.setItem(USER_KEY, JSON.stringify(session.user));
+  try {
+    localStorage.setItem(TOKEN_KEY, session.token);
+  } catch {
+    // Ignore token persistence failures and keep the in-memory session alive.
+  }
+
+  const primaryPayload = serializeStoredUser(session.user, "full");
+  if (tryStoreUser(primaryPayload)) {
+    return;
+  }
+
+  const compactPayload = serializeStoredUser(session.user, "compact");
+  if (tryStoreUser(compactPayload)) {
+    return;
+  }
+
+  try {
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
 }
 
 export function loadSession(): Session | null {
   const token = localStorage.getItem(TOKEN_KEY);
   const userJson = localStorage.getItem(USER_KEY);
-  if (!token || !userJson) {
+  if (!token) {
     return null;
+  }
+
+  if (!userJson) {
+    return { token, user: normalizeStoredUser({}) };
   }
 
   try {
     return { token, user: normalizeStoredUser(JSON.parse(userJson)) };
   } catch {
-    clearSession();
-    return null;
+    return { token, user: normalizeStoredUser({}) };
   }
 }
 
@@ -68,4 +90,76 @@ function normalizeStoredUser(raw: unknown): CurrentUser {
     created_at: typeof user.created_at === "string" ? user.created_at : "",
     updated_at: typeof user.updated_at === "string" ? user.updated_at : "",
   };
+}
+
+function tryStoreUser(value: string): boolean {
+  try {
+    localStorage.setItem(USER_KEY, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function serializeStoredUser(user: CurrentUser, mode: "full" | "compact"): string {
+  const isCompact = mode === "compact";
+  return JSON.stringify({
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    display_name: user.display_name,
+    nickname: user.nickname,
+    profile_status: trimText(user.profile_status, isCompact ? 160 : 400),
+    profile_photos: isCompact ? [] : sanitizeProfilePhotos(user.profile_photos, 4),
+    profile_banner_url: sanitizeStoredUrl(user.profile_banner_url, isCompact),
+    profile_background_url: sanitizeStoredUrl(user.profile_background_url, isCompact),
+    avatar_ring_style: user.avatar_ring_style,
+    is_email_confirmed: user.is_email_confirmed,
+    avatar_url: sanitizeStoredUrl(user.avatar_url, isCompact),
+    status: user.status,
+    current_game: trimText(user.current_game, 120),
+    notification_sound_url: sanitizeStoredUrl(user.notification_sound_url, true),
+    notification_volume: user.notification_volume,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+  });
+}
+
+function sanitizeProfilePhotos(photos: CurrentUser["profile_photos"], limit: number): CurrentUser["profile_photos"] {
+  return photos
+    .slice(0, limit)
+    .map((photo) => {
+      const nextUrl = sanitizeStoredUrl(photo.url, false);
+      if (!nextUrl) {
+        return null;
+      }
+      return {
+        url: nextUrl,
+        caption: trimText(photo.caption, 160),
+      };
+    })
+    .filter((photo): photo is { url: string; caption: string | null } => photo !== null);
+}
+
+function sanitizeStoredUrl(value: string | null | undefined, compact: boolean): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("data:")) {
+    return null;
+  }
+  const maxLength = compact ? 512 : 2048;
+  return trimmed.length <= maxLength ? trimmed : null;
+}
+
+function trimText(value: string | null | undefined, maxLength: number): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.slice(0, maxLength);
 }
