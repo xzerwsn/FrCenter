@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -26,6 +26,28 @@ from app.services.auth_service import (
 router = APIRouter()
 
 
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=token,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/",
+    )
+
+
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_202_ACCEPTED)
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)) -> RegisterResponse:
     try:
@@ -44,7 +66,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def login(payload: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)) -> TokenResponse:
     try:
         user = await authenticate_user(db, payload.email, payload.password)
     except InvalidCredentials as exc:
@@ -52,7 +74,15 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> To
     except EmailNotConfirmed as exc:
         raise HTTPException(status_code=403, detail="Email не подтвержден") from exc
 
-    return TokenResponse(access_token=create_access_token(user.id))
+    access_token = create_access_token(user.id)
+    _set_auth_cookie(response, access_token)
+    return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(response: Response) -> MessageResponse:
+    _clear_auth_cookie(response)
+    return MessageResponse(status="logged_out")
 
 
 @router.post("/confirm-email", response_model=MessageResponse)

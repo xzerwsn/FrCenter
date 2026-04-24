@@ -1,6 +1,6 @@
 import type { CurrentUser } from "../api/users";
 
-const TOKEN_KEY = "frcenter.accessToken";
+const LEGACY_TOKEN_KEY = "frcenter.accessToken";
 const USER_KEY = "frcenter.currentUser";
 
 export type Session = {
@@ -10,9 +10,9 @@ export type Session = {
 
 export function saveSession(session: Session): void {
   try {
-    localStorage.setItem(TOKEN_KEY, session.token);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
-    // Ignore token persistence failures and keep the in-memory session alive.
+    // Ignore cleanup failures for legacy token storage.
   }
 
   const primaryPayload = serializeStoredUser(session.user, "full");
@@ -33,25 +33,21 @@ export function saveSession(session: Session): void {
 }
 
 export function loadSession(): Session | null {
-  const token = localStorage.getItem(TOKEN_KEY);
+  const legacyToken = readLegacyToken();
   const userJson = localStorage.getItem(USER_KEY);
-  if (!token) {
-    return null;
-  }
-
   if (!userJson) {
-    return { token, user: normalizeStoredUser({}) };
+    return legacyToken ? { token: legacyToken, user: normalizeStoredUser({}) } : null;
   }
 
   try {
-    return { token, user: normalizeStoredUser(JSON.parse(userJson)) };
+    return { token: legacyToken, user: normalizeStoredUser(JSON.parse(userJson)) };
   } catch {
-    return { token, user: normalizeStoredUser({}) };
+    return { token: legacyToken, user: normalizeStoredUser({}) };
   }
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(LEGACY_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
 
@@ -162,4 +158,13 @@ function trimText(value: string | null | undefined, maxLength: number): string |
     return null;
   }
   return trimmed.slice(0, maxLength);
+}
+
+function readLegacyToken(): string {
+  try {
+    const token = localStorage.getItem(LEGACY_TOKEN_KEY);
+    return typeof token === "string" ? token : "";
+  } catch {
+    return "";
+  }
 }

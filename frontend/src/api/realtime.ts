@@ -25,7 +25,7 @@ export type RealtimeEvent =
       [key: string]: unknown;
     };
 
-export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) => void): { close: () => void } {
+export function connectRealtime(token: string | undefined, onEvent: (event: RealtimeEvent) => void): { close: () => void } {
   const wsUrl = buildWebSocketUrl();
   let closedByClient = false;
   let reconnectTimer: number | undefined;
@@ -40,7 +40,8 @@ export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) =
   };
 
   const connect = () => {
-    socket = new WebSocket(`${wsUrl}/ws?token=${encodeURIComponent(token)}`);
+    const wsEndpoint = token ? `${wsUrl}/ws?token=${encodeURIComponent(token)}` : `${wsUrl}/ws`;
+    socket = new WebSocket(wsEndpoint);
 
     socket.onopen = () => {
       clearHeartbeat();

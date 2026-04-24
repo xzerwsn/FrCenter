@@ -29,3 +29,7 @@ export async function confirmEmail(email: string, code: string): Promise<{ statu
 export async function login(email: string, password: string): Promise<LoginResponse> {
   return apiPost<LoginResponse>("/api/auth/login", { email, password });
 }
+
+export async function logout(): Promise<{ status: string }> {
+  return apiPost<{ status: string }>("/api/auth/logout", {});
+}

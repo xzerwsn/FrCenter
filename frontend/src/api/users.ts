@@ -56,7 +56,7 @@ export type CurrentUserUpdatePayload = {
   profile_photos?: ProfilePhoto[] | null;
 };
 
-export async function getMe(token: string): Promise<CurrentUser> {
+export async function getMe(token?: string): Promise<CurrentUser> {
   return apiGet<CurrentUser>("/api/users/me", { token });
 }
 

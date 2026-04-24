@@ -6,6 +6,7 @@ type ApiOptions = {
 
 export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
+    credentials: "include",
     headers: createHeaders(options.token),
   });
   return parseResponse<T>(response);
@@ -14,6 +15,7 @@ export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise
 export async function apiPost<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "POST",
+    credentials: "include",
     headers: createHeaders(options.token),
     body: JSON.stringify(body),
   });
@@ -23,6 +25,7 @@ export async function apiPost<T>(path: string, body: unknown, options: ApiOption
 export async function apiDelete<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "DELETE",
+    credentials: "include",
     headers: createHeaders(options.token),
     body: JSON.stringify(body),
   });
@@ -32,6 +35,7 @@ export async function apiDelete<T>(path: string, body: unknown, options: ApiOpti
 export async function apiPatch<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "PATCH",
+    credentials: "include",
     headers: createHeaders(options.token),
     body: JSON.stringify(body),
   });

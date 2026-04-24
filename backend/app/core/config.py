@@ -39,6 +39,8 @@ class Settings(BaseSettings):
         r"(?::\d+)?$"
     )
     backend_url: str = "http://localhost:8000"
+    auth_cookie_name: str = "frcenter_session"
+    auth_cookie_samesite: str = "lax"
     access_token_expire_minutes: int = 60 * 24 * 7
     email_confirmation_expire_minutes: int = 30
     sql_echo: bool = False
@@ -65,6 +67,10 @@ class Settings(BaseSettings):
         if self.frontend_url not in origins:
             origins.append(self.frontend_url)
         return origins
+
+    @property
+    def auth_cookie_secure(self) -> bool:
+        return self.app_env != "development"
 
 
 settings = Settings()

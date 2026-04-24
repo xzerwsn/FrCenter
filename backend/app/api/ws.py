@@ -1,6 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.security import decode_access_token
 from app.core.websocket import connection_manager
 from app.db.session import AsyncSessionLocal
@@ -11,7 +12,8 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = None) -> None:
-    user = await _authenticate_websocket(token)
+    cookie_token = websocket.cookies.get(settings.auth_cookie_name)
+    user = await _authenticate_websocket(cookie_token or token)
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

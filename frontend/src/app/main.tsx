@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 
-import { confirmEmail, login, register } from "../api/auth";
+import { confirmEmail, login, logout, register } from "../api/auth";
 import {
   type Chat,
   type Message,
@@ -101,7 +101,7 @@ type SiteTheme = {
 const SITE_THEMES: SiteTheme[] = [
   {
     id: "classic-dark",
-    name: "Классическая тёмная",
+    name: "Тёмная",
     background: "#0F1722",
     surface: "#1A2431",
     text: "#F3F7FB",
@@ -110,76 +110,12 @@ const SITE_THEMES: SiteTheme[] = [
   },
   {
     id: "classic-light",
-    name: "Классическая светлая",
+    name: "Светлая",
     background: "#F4F7FB",
     surface: "#FFFFFF",
     text: "#18212B",
     accent: "#3E79F7",
     secondaryAccent: "#87B4FF",
-  },
-  {
-    id: "chinese-black-warm-accents",
-    name: "Китайский чёрный (Chinese Black & Warm Accents)",
-    background: "#0C1519",
-    surface: "#162127",
-    text: "#3A3534",
-    accent: "#724B39",
-    secondaryAccent: "#CF9D7B",
-  },
-  {
-    id: "night-sky-palette",
-    name: "Ночное небо (Palette)",
-    background: "#252330",
-    surface: "#3B3A4A",
-    text: "#F5F9F8",
-    accent: "#575669",
-    secondaryAccent: "#595168",
-  },
-  {
-    id: "ocean",
-    name: "Океан (Ocean)",
-    background: "#24292E",
-    surface: "#4A5156",
-    text: "#808A92",
-    accent: "#BDC7CE",
-    // Ocean palette in request includes 4 unique HEX values, so secondary accent reuses Blue Dolphin.
-    secondaryAccent: "#808A92",
-  },
-  {
-    id: "ashes",
-    name: "Пепел (Ashes)",
-    background: "#B7B4AE",
-    surface: "#726E68",
-    text: "#33312F",
-    accent: "#371E1E",
-    secondaryAccent: "#0A0A0A",
-  },
-  {
-    id: "back-in-black",
-    name: "Снова в чёрном (Back in Black)",
-    background: "#16131F",
-    surface: "#F0D9E4",
-    text: "#C1A0AC",
-    accent: "#4A3F4B",
-    secondaryAccent: "#806C79",
-  },
-  {
-    id: "berries",
-    name: "Ягоды (Berries)",
-    background: "#1D2B38",
-    surface: "#526161",
-    text: "#6F3742",
-    accent: "#B6ADA2",
-    secondaryAccent: "#C36765",
-  },
-  {
-    id: "northern-lights",
-    name: "Северное сияние (Northern Lights)",
-    background: "#1F0922",
-    surface: "#4B2B55",
-    text: "#6F7074",
-    accent: "#89B199",
-    secondaryAccent: "#CAD5D4",
   },
 ];
 
@@ -204,6 +140,7 @@ function App() {
   const [pendingEmail, setPendingEmail] = React.useState("");
   const [devCode, setDevCode] = React.useState<string | null>(null);
   const [themeId, setThemeId] = React.useState<string>(() => loadStoredThemeId());
+  const [authBootstrapDone, setAuthBootstrapDone] = React.useState<boolean>(() => loadSession() !== null);
   const activeTheme = React.useMemo(() => SITE_THEMES.find((theme) => theme.id === themeId) ?? SITE_THEMES[0], [themeId]);
 
   React.useEffect(() => {
@@ -216,6 +153,7 @@ function App() {
     const nextSession = { token, user };
     saveSession(nextSession);
     setSession(nextSession);
+    setAuthBootstrapDone(true);
     await createAndRegisterDevice(token, cloudPassword);
   }
 
@@ -226,9 +164,46 @@ function App() {
   }
 
   function handleLogout() {
-    clearSession();
-    setSession(null);
+    void logout()
+      .catch(() => {
+        // Ignore logout transport failures and still close the local shell.
+      })
+      .finally(() => {
+        clearSession();
+        setSession(null);
+        setAuthBootstrapDone(true);
+      });
   }
+
+  React.useEffect(() => {
+    if (session) {
+      setAuthBootstrapDone(true);
+      return;
+    }
+    let active = true;
+    void getMe()
+      .then((user) => {
+        if (!active) {
+          return;
+        }
+        const nextSession = { token: "", user };
+        saveSession(nextSession);
+        setSession(nextSession);
+      })
+      .catch(() => {
+        if (active) {
+          clearSession();
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAuthBootstrapDone(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [session]);
 
   React.useEffect(() => {
     if (!session) {
@@ -253,6 +228,14 @@ function App() {
       active = false;
     };
   }, [session?.token]);
+
+  if (!session && !authBootstrapDone) {
+    return (
+      <AuthShell>
+        <p className="form-status">Проверяем сессию...</p>
+      </AuthShell>
+    );
+  }
 
   if (!session) {
     return (
@@ -1900,10 +1883,10 @@ function ChatsPanel({
   );
   const chatPaneStyle: React.CSSProperties | undefined = selectedChat?.background_url
     ? {
-        backgroundImage: `linear-gradient(rgb(75 18 32 / 80%), rgb(75 18 32 / 90%)), url("${selectedChat.background_url}")`,
-        backgroundSize: "100% 100%, cover",
-        backgroundPosition: "center, center",
-        backgroundRepeat: "no-repeat, no-repeat",
+        backgroundImage: `url("${selectedChat.background_url}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
       }
     : undefined;
 
