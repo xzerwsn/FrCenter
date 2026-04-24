@@ -100,6 +100,24 @@ type SiteTheme = {
 
 const SITE_THEMES: SiteTheme[] = [
   {
+    id: "classic-dark",
+    name: "Классическая тёмная",
+    background: "#0F1722",
+    surface: "#1A2431",
+    text: "#F3F7FB",
+    accent: "#4C8DFF",
+    secondaryAccent: "#8EC5FF",
+  },
+  {
+    id: "classic-light",
+    name: "Классическая светлая",
+    background: "#F4F7FB",
+    surface: "#FFFFFF",
+    text: "#18212B",
+    accent: "#3E79F7",
+    secondaryAccent: "#87B4FF",
+  },
+  {
     id: "chinese-black-warm-accents",
     name: "Китайский чёрный (Chinese Black & Warm Accents)",
     background: "#0C1519",
@@ -568,32 +586,46 @@ function Dashboard({
     setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
   }, [section]);
 
+  const playNotificationSound = React.useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      // Ignore autoplay restrictions until the user interacts with the page.
+    });
+  }, []);
+
   React.useEffect(() => {
     const socket = connectRealtime(session.token, (event: RealtimeEvent) => {
+      if (event.type === "message.new" && event.message && typeof event.message === "object") {
+        const incomingMessage = event.message as Message;
+        if (incomingMessage.sender.id !== session.user.id) {
+          playNotificationSound();
+        }
+        return;
+      }
       if (event.type !== "notification.new" || !event.notification || typeof event.notification !== "object") {
         return;
       }
       const incoming = event.notification as AppNotification;
       setNotifications((current) => [incoming, ...current.filter((item) => item.id !== incoming.id)].slice(0, 50));
       setUnreadNotifications((current) => current + (incoming.is_read ? 0 : 1));
-      if (audioRef.current && session.user.notification_sound_url) {
-        audioRef.current.currentTime = 0;
-        void audioRef.current.play().catch(() => {
-          // Ignore autoplay restrictions until the user interacts with the page.
-        });
-      }
+      playNotificationSound();
       if (incoming.kind === "friend_request") {
         void refreshFriendRequests();
       }
     });
     return () => socket.close();
-  }, [session.token, session.user.notification_sound_url]);
+  }, [playNotificationSound, session.token, session.user.id]);
 
   React.useEffect(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio(session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
     }
     audioRef.current.src = session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL;
+    audioRef.current.preload = "auto";
     audioRef.current.volume = Math.max(0, Math.min(1, session.user.notification_volume ?? 0.7));
   }, [session.user.notification_sound_url, session.user.notification_volume]);
 
