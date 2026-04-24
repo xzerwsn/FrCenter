@@ -136,7 +136,6 @@ async def list_messages(db: AsyncSession, current_user: User, chat_id: str) -> l
         .order_by(Message.created_at.asc())
         .limit(100)
     )
-    await mark_chat_read(db, current_user.id, chat_id)
     return list(result.scalars().all())
 
 

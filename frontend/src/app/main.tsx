@@ -59,6 +59,7 @@ type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "notifications" | "games" | "clips" | "settings";
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
+const CHATS_CACHE_PREFIX = "frcenter.chatsCache.";
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const PINNED_CHATS_HEIGHT_STORAGE_KEY = "frcenter.pinnedChatsHeight";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
@@ -1391,7 +1392,7 @@ function ChatsPanel({
   me: CurrentUser;
   friends: UserPublic[];
 }) {
-  const [chats, setChats] = React.useState<Chat[]>([]);
+  const [chats, setChats] = React.useState<Chat[]>(() => readStoredChats(me.id));
   const [selectedChatId, setSelectedChatId] = React.useState<string>("");
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
@@ -1417,6 +1418,7 @@ function ChatsPanel({
   const [pinnedChatsHeight, setPinnedChatsHeight] = React.useState<number>(() => readStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, 220));
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
+  const [chatsLoading, setChatsLoading] = React.useState<boolean>(() => readStoredChats(me.id).length === 0);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === "undefined") {
@@ -1687,6 +1689,10 @@ function ChatsPanel({
   }, [hiddenChatIds]);
 
   React.useEffect(() => {
+    writeStoredChats(me.id, chats);
+  }, [chats, me.id]);
+
+  React.useEffect(() => {
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
@@ -1708,8 +1714,13 @@ function ChatsPanel({
   }, [orderedChats]);
 
   async function reloadChats() {
-    const response = await listChats(token);
-    setChats(response.chats);
+    setChatsLoading(true);
+    try {
+      const response = await listChats(token);
+      setChats(response.chats);
+    } finally {
+      setChatsLoading(false);
+    }
   }
 
   function bumpChatActivity(chatId: string, updatedAt: string) {
@@ -2468,7 +2479,8 @@ function ChatsPanel({
             </button>
           ) : null}
           <div className="regular-chat-list">{regularChats.map(renderChatRow)}</div>
-          {orderedChats.length === 0 ? <p className="form-status">Чатов пока нет</p> : null}
+          {chatsLoading && orderedChats.length === 0 ? <p className="form-status">Загружаем чаты...</p> : null}
+          {!chatsLoading && orderedChats.length === 0 ? <p className="form-status">Чатов пока нет</p> : null}
         </div>
       </div>
 
@@ -2652,7 +2664,7 @@ function ChatsPanel({
           {messagesLoading ? <p className="form-status">Загружаем сообщения...</p> : null}
           {messages.map((message) => (
             <div
-              className={`message ${message.sender.id === me.id ? "mine" : ""}`}
+              className={`message message-enter ${message.sender.id === me.id ? "mine" : ""}`}
               key={message.id}
               onContextMenu={(event) => {
                 if (!canManageMessage(message)) {
@@ -2882,7 +2894,17 @@ function MediaMessageView({
                 <img alt={payload.file_name} className="media-inline-preview" src={url} />
               </button>
             ) : null}
-            {isVideo ? <video className="media-inline-preview" controls src={url} /> : null}
+            {isVideo ? (
+              <video
+                className="media-inline-video"
+                controls
+                loop
+                muted
+                playsInline
+                preload="metadata"
+                src={url}
+              />
+            ) : null}
             {isAudio ? <audio className="media-inline-audio" controls src={url} /> : null}
             {!isImage && !isVideo && !isAudio ? (
               <a className="media-file-link" download={payload.file_name} href={url} rel="noreferrer" target="_blank">
@@ -3127,6 +3149,30 @@ function readStoredStringList(key: string): string[] {
 function writeStoredStringList(key: string, values: string[]): void {
   try {
     localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+function readStoredChats(userId: string): Chat[] {
+  try {
+    const raw = localStorage.getItem(`${CHATS_CACHE_PREFIX}${userId}`);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed as Chat[];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredChats(userId: string, chats: Chat[]): void {
+  try {
+    localStorage.setItem(`${CHATS_CACHE_PREFIX}${userId}`, JSON.stringify(chats));
   } catch {
     // ignore storage write errors
   }
