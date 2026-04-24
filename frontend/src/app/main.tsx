@@ -1024,8 +1024,8 @@ function ProfilePanel({
       <div className="profile-panel profile-layout-card">
         {cardBackground ? (
           <div aria-hidden="true" className="profile-background-media">
-            <img alt="" className="profile-background-blur" src={cardBackground} />
-            <img alt="" className="profile-background-image" src={cardBackground} />
+            <img alt="" className="profile-background-blur" decoding="async" loading="lazy" src={cardBackground} />
+            <img alt="" className="profile-background-image" decoding="async" loading="lazy" src={cardBackground} />
           </div>
         ) : null}
         <div className="profile-layout-head">
@@ -1078,15 +1078,15 @@ function ProfilePanel({
               <div className="profile-banner-strip">
                 {cardBanner ? (
                   <>
-                    <img alt="" aria-hidden="true" className="profile-banner-blur" src={cardBanner} />
-                    <img alt="Баннер профиля" className="profile-banner-image" src={cardBanner} />
+                    <img alt="" aria-hidden="true" className="profile-banner-blur" decoding="async" loading="lazy" src={cardBanner} />
+                    <img alt="Баннер профиля" className="profile-banner-image" decoding="async" loading="eager" src={cardBanner} />
                   </>
                 ) : null}
               </div>
               <div className="profile-identity-row">
                 <div className={`profile-avatar-ring ring-${cardRing}`}>
                   <div className="profile-avatar-core">
-                    {cardAvatar ? <img alt={profile.username} src={cardAvatar} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
+                    {cardAvatar ? <img alt={profile.username} decoding="async" loading="lazy" src={cardAvatar} /> : <span>{profile.username.slice(0, 1).toUpperCase()}</span>}
                   </div>
                 </div>
                 <div className="profile-main-meta">
@@ -1344,11 +1344,11 @@ function HomePanel({ token }: { token: string }) {
           <div className="home-feed-grid">
             {items.map((item, index) => (
               <article className="home-feed-card" key={`${item.author_id}-${item.image_url.slice(0, 24)}-${index}`}>
-                <img alt={item.caption || "Публикация"} className="home-feed-image" src={item.image_url} />
+                <img alt={item.caption || "Публикация"} className="home-feed-image" decoding="async" loading="lazy" src={item.image_url} />
                 <div className="home-feed-meta">
                   <div className="home-feed-author">
                     <div className="home-feed-avatar">
-                      {item.author_avatar_url ? <img alt={item.author_username} src={item.author_avatar_url} /> : item.author_username.slice(0, 1).toUpperCase()}
+                      {item.author_avatar_url ? <img alt={item.author_username} decoding="async" loading="lazy" src={item.author_avatar_url} /> : item.author_username.slice(0, 1).toUpperCase()}
                     </div>
                     <strong>@{item.author_username}</strong>
                   </div>
@@ -3182,7 +3182,7 @@ function ChatsPanel({
             tabIndex={0}
           >
             <div className="media-preview-dialog media-preview-dialog-image" onClick={(event) => event.stopPropagation()}>
-              <img alt="Медиа" className="media-preview-view media-preview-view-image" src={previewMediaUrl} />
+              <img alt="Медиа" className="media-preview-view media-preview-view-image" decoding="async" loading="eager" src={previewMediaUrl} />
             </div>
           </div>
         ) : null}
@@ -3220,7 +3220,8 @@ function MediaMessageView({
         const nextFiles: Array<{ payload: MediaPayloadFile; url: string }> = [];
         for (const payload of mediaPayloadFiles) {
           const response = await fetch(payload.media_url, {
-            headers: { Authorization: `Bearer ${token}` },
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
           });
           if (!response.ok) {
             throw new Error(`Не удалось загрузить медиа (${response.status})`);
@@ -3274,7 +3275,7 @@ function MediaMessageView({
           <div className="media-item" key={payload.media_id || `${payload.file_name}-${payload.file_nonce}`}>
             {isImage ? (
               <button className="media-inline-trigger" onClick={() => onPreview(url, payload.file_mime)} type="button">
-                <img alt={payload.file_name} className="media-inline-preview" src={url} />
+                <img alt={payload.file_name} className="media-inline-preview" decoding="async" loading="lazy" src={url} />
               </button>
             ) : null}
             {isVideo ? (

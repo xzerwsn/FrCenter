@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -64,6 +67,7 @@ async def upload_media(
 @router.get("/{media_id}")
 async def download_media(
     media_id: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
@@ -77,8 +81,25 @@ async def download_media(
     except NotChatMember as exc:
         raise HTTPException(status_code=403, detail="No access to this media") from exc
 
+    etag = f'W/"{sha256(f"{media.id}:{media.size}:{media.created_at.isoformat()}".encode("utf-8")).hexdigest()}"'
+    expires_at = (datetime.now(UTC) + timedelta(days=7)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "private, max-age=604800, stale-while-revalidate=86400",
+                "Expires": expires_at,
+            },
+        )
+
     return Response(
         content=media.encrypted_bytes,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{media.filename}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{media.filename}"',
+            "Cache-Control": "private, max-age=604800, stale-while-revalidate=86400",
+            "ETag": etag,
+            "Expires": expires_at,
+        },
     )

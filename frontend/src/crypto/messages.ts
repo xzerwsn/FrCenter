@@ -1,5 +1,3 @@
-import sodium from "libsodium-wrappers-sumo";
-
 import { base64ToBytes, bytesToBase64, bytesToText, textToBytes } from "./encoding";
 
 export type EncryptedMessagePayload = {
@@ -12,11 +10,20 @@ export type EncryptedBinaryPayload = {
   nonce: string;
 };
 
+let sodiumModulePromise: Promise<typeof import("libsodium-wrappers-sumo")> | null = null;
+
+async function getSodium() {
+  sodiumModulePromise ??= import("libsodium-wrappers-sumo");
+  const sodium = await sodiumModulePromise;
+  await sodium.ready;
+  return sodium;
+}
+
 export async function encryptTextForSharedKey(
   plaintext: string,
   sharedKeyBase64: string,
 ): Promise<EncryptedMessagePayload> {
-  await sodium.ready;
+  const sodium = await getSodium();
   const key = base64ToBytes(sharedKeyBase64);
   const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
   const ciphertext = sodium.crypto_secretbox_easy(textToBytes(plaintext), nonce, key);
@@ -31,7 +38,7 @@ export async function decryptTextWithSharedKey(
   payload: EncryptedMessagePayload,
   sharedKeyBase64: string,
 ): Promise<string> {
-  await sodium.ready;
+  const sodium = await getSodium();
   const decrypted = sodium.crypto_secretbox_open_easy(
     base64ToBytes(payload.ciphertext),
     base64ToBytes(payload.nonce),
@@ -42,7 +49,7 @@ export async function decryptTextWithSharedKey(
 }
 
 export async function createSharedMessageKey(): Promise<string> {
-  await sodium.ready;
+  const sodium = await getSodium();
   return bytesToBase64(sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES));
 }
 
@@ -50,7 +57,7 @@ export async function encryptBytesForSharedKey(
   plaintextBytes: Uint8Array,
   sharedKeyBase64: string,
 ): Promise<EncryptedBinaryPayload> {
-  await sodium.ready;
+  const sodium = await getSodium();
   const key = base64ToBytes(sharedKeyBase64);
   const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
   const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, key);
@@ -65,7 +72,7 @@ export async function decryptBytesWithSharedKey(
   nonceBase64: string,
   sharedKeyBase64: string,
 ): Promise<Uint8Array> {
-  await sodium.ready;
+  const sodium = await getSodium();
   const decrypted = sodium.crypto_secretbox_open_easy(
     ciphertextBytes,
     base64ToBytes(nonceBase64),

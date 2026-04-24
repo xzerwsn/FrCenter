@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.responses import Response
 
 from app.api.router import api_router
 from app.api.ws import router as ws_router
@@ -40,6 +42,24 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+    @app.middleware("http")
+    async def apply_cache_headers(request, call_next):
+        response: Response = await call_next(request)
+        if request.method != "GET":
+            return response
+
+        path = request.url.path
+        if path.startswith("/api/media/"):
+            response.headers.setdefault("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400")
+        elif path == "/health":
+            response.headers.setdefault("Cache-Control", "no-store")
+        elif path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "private, no-cache, max-age=0, must-revalidate")
+        else:
+            response.headers.setdefault("Cache-Control", "public, max-age=300")
+        return response
 
     app.include_router(ws_router)
     app.include_router(api_router, prefix="/api")

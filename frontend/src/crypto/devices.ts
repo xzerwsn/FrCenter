@@ -1,5 +1,3 @@
-import sodium from "libsodium-wrappers-sumo";
-
 import { bytesToBase64, textToBytes } from "./encoding";
 
 export type DeviceKeyBundle = {
@@ -13,11 +11,20 @@ export type DeviceKeyBundle = {
 const KEY_DERIVATION_OPSLIMIT = 3;
 const KEY_DERIVATION_MEMLIMIT = 64 * 1024 * 1024;
 
+let sodiumModulePromise: Promise<typeof import("libsodium-wrappers-sumo")> | null = null;
+
+async function getSodium() {
+  sodiumModulePromise ??= import("libsodium-wrappers-sumo");
+  const sodium = await sodiumModulePromise;
+  await sodium.ready;
+  return sodium;
+}
+
 export async function createDeviceKeyBundle(
   deviceName: string,
   cloudPassword: string,
 ): Promise<DeviceKeyBundle> {
-  await sodium.ready;
+  const sodium = await getSodium();
 
   const keyPair = sodium.crypto_box_keypair();
   const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
@@ -42,7 +49,7 @@ export async function createDeviceKeyBundle(
 }
 
 export async function fingerprintPublicKey(publicKey: string): Promise<string> {
-  await sodium.ready;
+  const sodium = await getSodium();
   const hash = sodium.crypto_hash_sha256(textToBytes(publicKey)).slice(0, 8);
   return bytesToBase64(hash);
 }

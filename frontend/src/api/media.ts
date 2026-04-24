@@ -19,9 +19,12 @@ export async function uploadEncryptedMedia(
 
   const response = await fetch(`${backendUrl}/api/media/upload`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: "include",
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : undefined,
     body: formData,
   });
 
