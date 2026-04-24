@@ -17,11 +17,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_messages_chat_created_desc "
-        "ON messages (chat_id, created_at DESC)"
+    op.create_index(
+        "ix_messages_chat_created_desc",
+        "messages",
+        ["chat_id", "created_at"],
+        unique=False,
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_messages_chat_created_desc")
+    op.drop_index("ix_messages_chat_created_desc", table_name="messages", if_exists=True)
