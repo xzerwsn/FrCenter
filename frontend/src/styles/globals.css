@@ -142,6 +142,10 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.form-status.visible {
+  visibility: visible;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr) 116px;
@@ -427,6 +431,15 @@ button:disabled {
   background: var(--color-accent-hover);
 }
 
+.inline-action.secondary {
+  background: color-mix(in srgb, var(--color-input) 88%, transparent);
+  color: var(--color-text);
+}
+
+.inline-action.secondary:hover {
+  background: color-mix(in srgb, var(--color-input) 66%, var(--color-accent-2) 34%);
+}
+
 .compact-input {
   margin-top: 14px;
 }
@@ -448,6 +461,48 @@ button:disabled {
 .tool-band h2 {
   margin: 0 0 14px;
   font-size: 1.5rem;
+}
+
+.panel-hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 18px;
+  padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-accent-2) 32%, transparent), transparent 28%),
+    linear-gradient(135deg, color-mix(in srgb, var(--color-surface-strong) 90%, transparent), color-mix(in srgb, var(--color-surface-deep) 74%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    0 20px 38px rgb(0 0 0 / 16%);
+}
+
+.panel-hero span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--color-button-text);
+  background: color-mix(in srgb, var(--color-accent) 88%, black 12%);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.panel-hero h2 {
+  margin: 16px 0 10px;
+  font-size: clamp(2rem, 3vw, 2.7rem);
+  line-height: 0.95;
+}
+
+.panel-hero p {
+  max-width: 560px;
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.55;
 }
 
 .theme-grid {
@@ -580,6 +635,338 @@ button:disabled {
 
 .invite-code-row .inline-action {
   margin-top: 0;
+}
+
+.friends-panel,
+.settings-panel {
+  align-items: start;
+}
+
+.friends-main-card,
+.settings-main-card {
+  min-width: 0;
+}
+
+.friends-side-column,
+.settings-side-column {
+  display: grid;
+  gap: 16px;
+}
+
+.friends-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.friends-stat {
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-input) 82%, transparent);
+}
+
+.friends-stat strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 1.5rem;
+}
+
+.friends-stat span {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.friends-search-form {
+  margin-bottom: 18px;
+}
+
+.friends-search-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  border-radius: 18px;
+  padding: 0 14px;
+  background: var(--color-input);
+}
+
+.friends-search-input svg {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.friends-search-input input {
+  padding-inline: 0;
+  background: transparent;
+}
+
+.friends-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.friend-card,
+.friends-panel-card,
+.settings-panel-card {
+  border: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-strong) 92%, transparent), color-mix(in srgb, var(--color-input) 84%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    0 18px 34px rgb(0 0 0 / 12%);
+}
+
+.friend-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.friend-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.friend-card-avatar {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--color-surface-deep);
+  color: var(--color-button-text);
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.friend-card-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.friend-card-meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.friend-card-meta strong,
+.friend-card-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-card-meta span,
+.friend-card-game,
+.friends-result-row span,
+.settings-card-head p,
+.settings-toggle-row span {
+  color: var(--color-text-muted);
+}
+
+.friend-card-head .status-pill {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.friend-card-game {
+  min-height: 42px;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.friend-card button,
+.friends-result-row button {
+  justify-self: start;
+  border: 0;
+  border-radius: 14px;
+  padding: 11px 14px;
+  color: var(--color-button-text);
+  background: var(--color-accent);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.friends-empty-state {
+  grid-column: 1 / -1;
+  padding: 24px;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 14%, transparent);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  text-align: center;
+  background: color-mix(in srgb, var(--color-input) 66%, transparent);
+}
+
+.friends-panel-card,
+.settings-panel-card {
+  padding: 18px;
+}
+
+.friends-card-head,
+.settings-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.friends-card-head h3,
+.settings-card-head h3 {
+  margin: 0 0 4px;
+  font-size: 1.08rem;
+}
+
+.friends-card-head p,
+.settings-card-head p {
+  margin: 0;
+}
+
+.friends-card-icon,
+.settings-card-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  color: var(--color-button-text);
+  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent-2) 72%, var(--color-accent) 28%));
+  flex: 0 0 auto;
+}
+
+.friends-result-list {
+  display: grid;
+  gap: 10px;
+}
+
+.friends-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-input) 88%, transparent);
+}
+
+.friends-result-row strong,
+.friends-result-row span {
+  display: block;
+}
+
+.invite-code-box {
+  margin-bottom: 14px;
+  border-radius: 18px;
+  padding: 16px;
+  color: var(--color-button-text);
+  background:
+    radial-gradient(circle at top right, rgb(255 255 255 / 14%), transparent 24%),
+    linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent-2) 70%, black 30%));
+  font-family: "Segoe UI", ui-sans-serif, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.friends-action-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.friends-action-row .inline-action {
+  flex: 1;
+  margin-top: 0;
+}
+
+.friends-status,
+.composer-status {
+  min-height: 22px;
+  visibility: hidden;
+}
+
+.settings-section-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-theme-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-toggle-list,
+.settings-note-list,
+.settings-security-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-input) 86%, transparent);
+}
+
+.settings-toggle-row strong,
+.settings-toggle-row span {
+  display: block;
+}
+
+.settings-toggle-row span {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.settings-toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  flex: 0 0 auto;
+}
+
+.settings-note-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.settings-note-row span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--color-button-text);
+  background: var(--color-accent);
+  font-size: 12px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.settings-note-row p {
+  margin: 2px 0 0;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+.settings-security-chip {
+  padding: 14px 16px;
+  border-radius: 16px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-input) 84%, transparent);
 }
 
 .chat-band {
@@ -1391,6 +1778,7 @@ button:disabled {
   border: 0;
   border-radius: 12px;
   padding: 10px 12px;
+  min-width: 112px;
   color: var(--color-button-text);
   background: var(--color-accent);
   font-weight: 800;
@@ -2169,6 +2557,12 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .friends-grid,
+  .settings-theme-grid,
+  .friends-stats {
+    grid-template-columns: 1fr;
+  }
+
   .chat-band {
     grid-template-columns: 1fr;
     height: auto;
@@ -2195,21 +2589,22 @@ button:disabled {
 
   .chat-band.mobile-mode.mobile-chat-open .chat-pane {
     position: fixed;
-    top: 0;
-    right: 0;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    right: 10px;
     bottom: 78px;
-    left: 0;
+    left: 10px;
     min-height: 0;
     height: auto;
     z-index: 110;
     padding:
-      calc(env(safe-area-inset-top, 0px) + 18px)
+      18px
       14px
       calc(env(safe-area-inset-bottom, 0px) + 12px)
       14px;
-    border-radius: 0;
+    border-radius: 24px;
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 96%, black 4%), color-mix(in srgb, var(--color-surface-strong) 92%, black 8%));
+    box-shadow: 0 18px 44px rgb(0 0 0 / 26%);
   }
 
   .chat-band.mobile-mode.mobile-chat-open .message-list {
@@ -2300,6 +2695,10 @@ button:disabled {
   }
 
   .inline-form {
+    flex-direction: column;
+  }
+
+  .friends-action-row {
     flex-direction: column;
   }
 
@@ -2422,6 +2821,10 @@ button:disabled {
   .tool-band {
     padding: 14px;
     border-radius: 20px;
+  }
+
+  .panel-hero {
+    padding: 18px;
   }
 
   .chat-row-main {

@@ -4,18 +4,24 @@ import {
   Bell,
   ChevronDown,
   ChevronLeft,
+  Copy,
   Gamepad2,
   Home,
   LogOut,
   MessageCircle,
+  Monitor,
   MoreHorizontal,
+  Palette,
   Paperclip,
   Pencil,
   Pin,
   PinOff,
   PlaySquare,
+  Search,
   Settings,
+  Shield,
   UserRound,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -66,6 +72,7 @@ const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
+const SELECTED_CHAT_STORAGE_KEY_PREFIX = "frcenter.selectedChat.";
 
 type SiteTheme = {
   id: string;
@@ -456,10 +463,28 @@ function Dashboard({
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
+  const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() => [loadStoredDashboardSection()]);
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
   }, [session.token]);
+
+  React.useEffect(() => {
+    let active = true;
+    void listChats(session.token)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+        writeStoredChats(session.user.id, response.chats);
+      })
+      .catch(() => {
+        // keep dashboard responsive even if prefetch fails
+      });
+    return () => {
+      active = false;
+    };
+  }, [session.token, session.user.id]);
 
   React.useEffect(() => {
     if (!selectedProfile || "email" in selectedProfile) {
@@ -490,6 +515,10 @@ function Dashboard({
       // ignore storage write errors
     }
   }, [selectedProfile, session.user.id]);
+
+  React.useEffect(() => {
+    setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
+  }, [section]);
 
   function openOwnProfile() {
     setSelectedProfile(null);
@@ -552,6 +581,7 @@ function Dashboard({
       </aside>
 
       <section className="content">
+        {mountedSections.includes("profile") ? (
         <div style={{ display: section === "profile" ? "block" : "none" }}>
           <ProfilePanel
             onLogout={onLogout}
@@ -561,27 +591,42 @@ function Dashboard({
             onSessionUserUpdate={onSessionUserUpdate}
           />
         </div>
+        ) : null}
+        {mountedSections.includes("home") ? (
         <div style={{ display: section === "home" ? "block" : "none" }}>
           <HomePanel token={session.token} />
         </div>
+        ) : null}
+        {mountedSections.includes("chats") ? (
         <div style={{ display: section === "chats" ? "block" : "none" }}>
           <ChatsPanel token={session.token} me={session.user} friends={friends} />
         </div>
+        ) : null}
+        {mountedSections.includes("friends") ? (
         <div style={{ display: section === "friends" ? "block" : "none" }}>
           <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
         </div>
+        ) : null}
+        {mountedSections.includes("notifications") ? (
         <div style={{ display: section === "notifications" ? "block" : "none" }}>
           <NotificationsPanel />
         </div>
+        ) : null}
+        {mountedSections.includes("games") ? (
         <div style={{ display: section === "games" ? "block" : "none" }}>
           <GamesPanel friends={friends} />
         </div>
+        ) : null}
+        {mountedSections.includes("clips") ? (
         <div style={{ display: section === "clips" ? "block" : "none" }}>
           <ClipsPanel friends={friends} />
         </div>
+        ) : null}
+        {mountedSections.includes("settings") ? (
         <div style={{ display: section === "settings" ? "block" : "none" }}>
           <SettingsPanel themeId={themeId} onThemeChange={onThemeChange} />
         </div>
+        ) : null}
       </section>
 
       <aside className="friends">
@@ -1188,48 +1233,127 @@ function SettingsPanel({
   const [notifEnabled, setNotifEnabled] = React.useState(true);
 
   return (
-    <section className="tool-band">
-      <div>
-        <h2>Темы</h2>
-        <div className="theme-grid">
-          {SITE_THEMES.map((theme) => (
-            <button
-              className={`theme-card ${themeId === theme.id ? "active" : ""}`}
-              key={theme.id}
-              onClick={() => onThemeChange(theme.id)}
-              type="button"
-            >
-              <div className="theme-card-swatches">
-                <span style={{ backgroundColor: theme.background }} />
-                <span style={{ backgroundColor: theme.surface }} />
-                <span style={{ backgroundColor: theme.text }} />
-                <span style={{ backgroundColor: theme.accent }} />
-                <span style={{ backgroundColor: theme.secondaryAccent }} />
+    <section className="tool-band settings-panel">
+      <div className="settings-main-card">
+        <div className="panel-hero panel-hero-settings">
+          <span>Settings center</span>
+          <h2>Настройки</h2>
+          <p>Управляй темой, уведомлениями и поведением клиента из одной аккуратной панели.</p>
+        </div>
+
+        <div className="settings-section-grid">
+          <section className="settings-panel-card">
+            <div className="settings-card-head">
+              <div className="settings-card-icon">
+                <Palette size={18} />
               </div>
-              <strong>{theme.name}</strong>
-            </button>
-          ))}
+              <div>
+                <h3>Темы</h3>
+                <p>Выбери палитру для всего интерфейса.</p>
+              </div>
+            </div>
+            <div className="theme-grid settings-theme-grid">
+              {SITE_THEMES.map((theme) => (
+                <button
+                  className={`theme-card ${themeId === theme.id ? "active" : ""}`}
+                  key={theme.id}
+                  onClick={() => onThemeChange(theme.id)}
+                  type="button"
+                >
+                  <div className="theme-card-swatches">
+                    <span style={{ backgroundColor: theme.background }} />
+                    <span style={{ backgroundColor: theme.surface }} />
+                    <span style={{ backgroundColor: theme.text }} />
+                    <span style={{ backgroundColor: theme.accent }} />
+                    <span style={{ backgroundColor: theme.secondaryAccent }} />
+                  </div>
+                  <strong>{theme.name}</strong>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="settings-panel-card">
+            <div className="settings-card-head">
+              <div className="settings-card-icon">
+                <Bell size={18} />
+              </div>
+              <div>
+                <h3>Поведение клиента</h3>
+                <p>Быстрые переключатели для ежедневной работы.</p>
+              </div>
+            </div>
+            <div className="settings-toggle-list">
+              <label className="settings-toggle-row">
+                <div>
+                  <strong>Запуск вместе с Windows</strong>
+                  <span>Открывать приложение сразу после входа в систему.</span>
+                </div>
+                <input checked={autoStart} onChange={() => setAutoStart((value) => !value)} type="checkbox" />
+              </label>
+              <label className="settings-toggle-row">
+                <div>
+                  <strong>Уведомления</strong>
+                  <span>Показывать новые сообщения и события в системе.</span>
+                </div>
+                <input checked={notifEnabled} onChange={() => setNotifEnabled((value) => !value)} type="checkbox" />
+              </label>
+            </div>
+          </section>
         </div>
       </div>
-      <div>
-        <p className="form-status">1 цвет: фон сайта</p>
-        <p className="form-status">2 цвет: карточки, хедер, футер</p>
-        <p className="form-status">3 цвет: текст и иконки</p>
-        <p className="form-status">4 цвет: кнопки, ссылки, активные элементы</p>
-        <p className="form-status">5 цвет: hover, обводки, бейджи</p>
-        <div className="result-list">
-          <label className="result-row">
-            <span>Запуск вместе с Windows</span>
-            <input checked={autoStart} onChange={() => setAutoStart((v) => !v)} type="checkbox" />
-          </label>
-          <label className="result-row">
-            <span>Уведомления</span>
-            <input checked={notifEnabled} onChange={() => setNotifEnabled((v) => !v)} type="checkbox" />
-          </label>
-        </div>
-        <h2>Безопасность</h2>
-        <p className="form-status">Сквозное шифрование работает автоматически.</p>
-        <p className="form-status">Ключи создаются и обновляются без ручных действий пользователя.</p>
+
+      <div className="settings-side-column">
+        <section className="settings-panel-card">
+          <div className="settings-card-head">
+            <div className="settings-card-icon">
+              <Monitor size={18} />
+            </div>
+            <div>
+              <h3>Система</h3>
+              <p>Небольшие подсказки по интерфейсу и цветам.</p>
+            </div>
+          </div>
+          <div className="settings-note-list">
+            <div className="settings-note-row">
+              <span>1</span>
+              <p>Фон сайта и большая подложка интерфейса.</p>
+            </div>
+            <div className="settings-note-row">
+              <span>2</span>
+              <p>Карточки, панели и контейнеры поверх фона.</p>
+            </div>
+            <div className="settings-note-row">
+              <span>3</span>
+              <p>Текст, подписи и иконки основного слоя.</p>
+            </div>
+            <div className="settings-note-row">
+              <span>4</span>
+              <p>Кнопки, ссылки и активные элементы.</p>
+            </div>
+            <div className="settings-note-row">
+              <span>5</span>
+              <p>Hover-состояния, обводки и вспомогательные бейджи.</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="settings-panel-card">
+          <div className="settings-card-head">
+            <div className="settings-card-icon">
+              <Shield size={18} />
+            </div>
+            <div>
+              <h3>Безопасность</h3>
+              <p>Что уже работает в клиенте по умолчанию.</p>
+            </div>
+          </div>
+          <div className="settings-security-list">
+            <div className="settings-security-chip">Сквозное шифрование включено автоматически</div>
+            <div className="settings-security-chip">Ключи создаются локально на устройстве</div>
+            <div className="settings-security-chip">Обновление ключей не требует ручных действий</div>
+          </div>
+        </section>
       </div>
     </section>
   );
@@ -1250,6 +1374,14 @@ function FriendsPanel({
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const onlineFriends = React.useMemo(
+    () => friends.filter((friend) => normalizeStatus(friend.status) === "online").length,
+    [friends],
+  );
+  const pendingResults = React.useMemo(
+    () => searchResults.filter((user) => !friends.some((friend) => friend.id === user.id)),
+    [friends, searchResults],
+  );
 
   React.useEffect(() => {
     void refreshFriends();
@@ -1331,54 +1463,113 @@ function FriendsPanel({
   }
 
   return (
-    <section className="tool-band">
-      <div>
-        <h2>Друзья</h2>
-        <form className="inline-form" onSubmit={handleSearch}>
-          <input placeholder="Username" value={query} onChange={(event) => setQuery(event.target.value)} required />
+    <section className="tool-band friends-panel">
+      <div className="friends-main-card">
+        <div className="panel-hero panel-hero-friends">
+          <span>Friends hub</span>
+          <h2>Друзья</h2>
+          <p>Быстрый поиск, карточки профилей и invite-код в одном пространстве без перегруза.</p>
+          <div className="friends-stats">
+            <div className="friends-stat">
+              <strong>{friends.length}</strong>
+              <span>всего друзей</span>
+            </div>
+            <div className="friends-stat">
+              <strong>{onlineFriends}</strong>
+              <span>сейчас онлайн</span>
+            </div>
+            <div className="friends-stat">
+              <strong>{inviteCode ? "готов" : "..."}</strong>
+              <span>invite-код</span>
+            </div>
+          </div>
+        </div>
+
+        <form className="inline-form friends-search-form" onSubmit={handleSearch}>
+          <div className="friends-search-input">
+            <Search size={16} />
+            <input placeholder="Найти по username" value={query} onChange={(event) => setQuery(event.target.value)} required />
+          </div>
           <button type="submit">Найти</button>
         </form>
-        <div className="result-list">
+
+        <div className="friends-grid">
           {friends.map((friend) => (
-            <div className="result-row" key={friend.id}>
-              <span>{friend.username}</span>
+            <article className="friend-card" key={friend.id}>
+              <div className="friend-card-head">
+                <div className="friend-card-avatar">
+                  {friend.avatar_url ? <img alt={friend.username} src={friend.avatar_url} /> : friend.username.slice(0, 1).toUpperCase()}
+                </div>
+                <div className="friend-card-meta">
+                  <strong>{friend.display_name || friend.username}</strong>
+                  <span>@{friend.username}</span>
+                </div>
+                <small className={`status-pill status-${normalizeStatus(friend.status)}`}>{humanizeStatus(friend.status)}</small>
+              </div>
+              <p className="friend-card-game">{friend.current_game ?? "Сейчас не играет"}</p>
               <button onClick={() => onOpenProfile(friend)} type="button">
                 Профиль
               </button>
-            </div>
+            </article>
           ))}
-        </div>
-        <div className="result-list">
-          {searchResults.map((user) => (
-            <div className="result-row" key={user.id}>
-              <span>{user.username}</span>
-              <button onClick={() => handleRequest(user.username)} type="button">
-                Заявка
-              </button>
-            </div>
-          ))}
+          {friends.length === 0 ? <div className="friends-empty-state">Пока нет друзей. Найди пользователя или пригласи по коду.</div> : null}
         </div>
       </div>
 
-      <div>
-        <h2>Invite</h2>
-        <button className="inline-action" onClick={handleCreateInvite} type="button">
-          Создать код
-        </button>
-        {inviteCode ? (
-          <div className="invite-code-row">
-            <small className="invite-code">{inviteCode}</small>
-            <button className="inline-action" onClick={handleCopyInviteCode} type="button">
+      <div className="friends-side-column">
+        <section className="friends-panel-card">
+          <div className="friends-card-head">
+            <div className="friends-card-icon">
+              <UserPlus size={18} />
+            </div>
+            <div>
+              <h3>Добавить друга</h3>
+              <p>Результаты поиска и отправка заявки.</p>
+            </div>
+          </div>
+          <div className="friends-result-list">
+            {pendingResults.map((user) => (
+              <div className="friends-result-row" key={user.id}>
+                <div>
+                  <strong>{user.display_name || user.username}</strong>
+                  <span>@{user.username}</span>
+                </div>
+                <button onClick={() => handleRequest(user.username)} type="button">
+                  Заявка
+                </button>
+              </div>
+            ))}
+            {query && pendingResults.length === 0 ? <p className="form-status">После поиска здесь появятся новые пользователи.</p> : null}
+          </div>
+        </section>
+
+        <section className="friends-panel-card friends-invite-card">
+          <div className="friends-card-head">
+            <div className="friends-card-icon">
+              <Copy size={18} />
+            </div>
+            <div>
+              <h3>Invite-код</h3>
+              <p>Создай код и поделись им, чтобы добавить друга быстрее.</p>
+            </div>
+          </div>
+          <div className="invite-code-box">{inviteCode || "Код еще не создан"}</div>
+          <div className="friends-action-row">
+            <button className="inline-action" onClick={handleCreateInvite} type="button">
+              Создать код
+            </button>
+            <button className="inline-action secondary" onClick={handleCopyInviteCode} type="button">
               Скопировать
             </button>
           </div>
-        ) : null}
-        <form className="inline-form stacked" onSubmit={handleAddByCode}>
-          <input placeholder="Код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
-          <button type="submit">Добавить</button>
-        </form>
+          <form className="inline-form stacked" onSubmit={handleAddByCode}>
+            <input placeholder="Вставь код друга" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} required />
+            <button type="submit">Добавить по коду</button>
+          </form>
+        </section>
+
+        <p className={`form-status friends-status ${status ? "visible" : ""}`}>{status || " "}</p>
       </div>
-      {status ? <p className="form-status">{status}</p> : null}
     </section>
   );
 }
@@ -1393,7 +1584,7 @@ function ChatsPanel({
   friends: UserPublic[];
 }) {
   const [chats, setChats] = React.useState<Chat[]>(() => readStoredChats(me.id));
-  const [selectedChatId, setSelectedChatId] = React.useState<string>("");
+  const [selectedChatId, setSelectedChatId] = React.useState<string>(() => readStoredSelectedChatId(me.id));
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
   const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([]);
@@ -1418,6 +1609,7 @@ function ChatsPanel({
   const [pinnedChatsHeight, setPinnedChatsHeight] = React.useState<number>(() => readStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, 220));
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
+  const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [chatsLoading, setChatsLoading] = React.useState<boolean>(() => readStoredChats(me.id).length === 0);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
@@ -1693,6 +1885,10 @@ function ChatsPanel({
   }, [chats, me.id]);
 
   React.useEffect(() => {
+    writeStoredSelectedChatId(me.id, selectedChatId);
+  }, [me.id, selectedChatId]);
+
+  React.useEffect(() => {
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
@@ -1718,6 +1914,12 @@ function ChatsPanel({
     try {
       const response = await listChats(token);
       setChats(response.chats);
+      const hotChat = [...response.chats].sort(
+        (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
+      )[0];
+      if (hotChat && !chatMessagesCacheRef.current[hotChat.id]) {
+        void prefetchChatMessages(hotChat.id);
+      }
     } finally {
       setChatsLoading(false);
     }
@@ -2018,12 +2220,14 @@ function ChatsPanel({
       return;
     }
 
+    const activeChatId = selectedChatId;
+    setIsSendingMessage(true);
     try {
       if (text) {
         const optimisticId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const optimisticMessage: Message = {
           id: optimisticId,
-          chat_id: selectedChatId,
+          chat_id: activeChatId,
           sender: currentUserPublic,
           ciphertext: "",
           nonce: "",
@@ -2033,30 +2237,29 @@ function ChatsPanel({
         };
         setMessages((previous) => {
           const next = [...previous, optimisticMessage];
-          chatMessagesCacheRef.current[selectedChatId] = next;
+          chatMessagesCacheRef.current[activeChatId] = next;
           return next;
         });
         setDecodeMap((previous) => {
           const next = { ...previous, [optimisticId]: text };
-          decodedMessagesCacheRef.current[selectedChatId] = next;
+          decodedMessagesCacheRef.current[activeChatId] = next;
           return next;
         });
-        bumpChatActivity(selectedChatId, optimisticMessage.created_at);
+        bumpChatActivity(activeChatId, optimisticMessage.created_at);
         setMessageText("");
-        setStatus("Отправляем сообщение...");
         const sentMessage = await sendEncryptedText(text);
         setMessages((previous) => {
           const next = dedupeMessagesById(previous.map((item) => (item.id === optimisticId ? sentMessage : item)));
-          chatMessagesCacheRef.current[selectedChatId] = next;
+          chatMessagesCacheRef.current[activeChatId] = next;
           return next;
         });
         setDecodeMap((previous) => {
           const next = { ...previous, [sentMessage.id]: text };
           delete next[optimisticId];
-          decodedMessagesCacheRef.current[selectedChatId] = next;
+          decodedMessagesCacheRef.current[activeChatId] = next;
           return next;
         });
-        bumpChatActivity(selectedChatId, sentMessage.created_at);
+        bumpChatActivity(activeChatId, sentMessage.created_at);
       }
       if (attachmentFiles.length > 0) {
         const batches = chunkArray(attachmentFiles, 10);
@@ -2092,12 +2295,14 @@ function ChatsPanel({
               delete next[messageId];
             }
           }
-          decodedMessagesCacheRef.current[selectedChatId] = next;
+          decodedMessagesCacheRef.current[activeChatId] = next;
           return next;
         });
         setMessageText(text);
       }
       setStatus(error instanceof Error ? error.message : "Не удалось отправить сообщение");
+    } finally {
+      setIsSendingMessage(false);
     }
   }
 
@@ -2753,7 +2958,7 @@ function ChatsPanel({
           <button
             aria-label="Прикрепить файл"
             className="composer-icon-button"
-            disabled={!selectedChatId}
+            disabled={!selectedChatId || isSendingMessage}
             onClick={() => attachmentInputRef.current?.click()}
             type="button"
           >
@@ -2764,8 +2969,11 @@ function ChatsPanel({
             placeholder="Сообщение"
             value={messageText}
           />
-          <button disabled={!selectedChatId || (!messageText.trim() && attachmentFiles.length === 0)} type="submit">
-            Отправить
+          <button
+            disabled={!selectedChatId || isSendingMessage || (!messageText.trim() && attachmentFiles.length === 0)}
+            type="submit"
+          >
+            {isSendingMessage ? "Отправка..." : "Отправить"}
           </button>
         </form>
 
@@ -2786,7 +2994,7 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        {status ? <p className="form-status">{status}</p> : null}
+        <p className={`form-status composer-status ${status ? "visible" : ""}`}>{status || " "}</p>
 
         {previewMediaUrl && previewMediaType.startsWith("image/") ? (
           <div
@@ -3167,6 +3375,27 @@ function readStoredChats(userId: string): Chat[] {
     return parsed as Chat[];
   } catch {
     return [];
+  }
+}
+
+function readStoredSelectedChatId(userId: string): string {
+  try {
+    return localStorage.getItem(`${SELECTED_CHAT_STORAGE_KEY_PREFIX}${userId}`) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredSelectedChatId(userId: string, chatId: string): void {
+  try {
+    const storageKey = `${SELECTED_CHAT_STORAGE_KEY_PREFIX}${userId}`;
+    if (!chatId) {
+      localStorage.removeItem(storageKey);
+      return;
+    }
+    localStorage.setItem(storageKey, chatId);
+  } catch {
+    // ignore storage write errors
   }
 }
 
