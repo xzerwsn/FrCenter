@@ -1,4 +1,5 @@
 from collections import defaultdict
+import asyncio
 
 from fastapi import WebSocket
 
@@ -28,8 +29,7 @@ class ConnectionManager:
             self.disconnect(user_id, websocket)
 
     async def broadcast_to_users(self, user_ids: list[str], payload: dict) -> None:
-        for user_id in user_ids:
-            await self.send_to_user(user_id, payload)
+        await asyncio.gather(*(self.send_to_user(user_id, payload) for user_id in user_ids))
 
 
 connection_manager = ConnectionManager()

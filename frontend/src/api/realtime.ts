@@ -21,20 +21,67 @@ export type RealtimeEvent =
       [key: string]: unknown;
     };
 
-export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) => void): WebSocket {
+export function connectRealtime(token: string, onEvent: (event: RealtimeEvent) => void): { close: () => void } {
   const wsUrl = buildWebSocketUrl();
-  const socket = new WebSocket(`${wsUrl}/ws?token=${encodeURIComponent(token)}`);
+  let closedByClient = false;
+  let reconnectTimer: number | undefined;
+  let heartbeatTimer: number | undefined;
+  let socket: WebSocket | null = null;
 
-  socket.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data) as RealtimeEvent;
-      onEvent(payload);
-    } catch {
-      // Ignore malformed payloads in this prototype stage.
+  const clearHeartbeat = () => {
+    if (heartbeatTimer !== undefined) {
+      window.clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
     }
   };
 
-  return socket;
+  const connect = () => {
+    socket = new WebSocket(`${wsUrl}/ws?token=${encodeURIComponent(token)}`);
+
+    socket.onopen = () => {
+      clearHeartbeat();
+      heartbeatTimer = window.setInterval(() => {
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 15000);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as RealtimeEvent;
+        if (payload.type !== "pong") {
+          onEvent(payload);
+        }
+      } catch {
+        // Ignore malformed payloads in this prototype stage.
+      }
+    };
+
+    socket.onclose = () => {
+      clearHeartbeat();
+      if (!closedByClient) {
+        reconnectTimer = window.setTimeout(connect, 700);
+      }
+    };
+
+    socket.onerror = () => {
+      socket?.close();
+    };
+  };
+
+  connect();
+
+  return {
+    close: () => {
+      closedByClient = true;
+      clearHeartbeat();
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+      }
+      socket?.close();
+    },
+  };
 }
 
 function buildWebSocketUrl(): string {

@@ -59,6 +59,7 @@ type DashboardSection = "profile" | "home" | "chats" | "friends" | "notification
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
+const PINNED_CHATS_HEIGHT_STORAGE_KEY = "frcenter.pinnedChatsHeight";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
@@ -187,6 +188,30 @@ function App() {
     clearSession();
     setSession(null);
   }
+
+  React.useEffect(() => {
+    if (!session) {
+      return;
+    }
+    let active = true;
+    void getMe(session.token)
+      .then((user) => {
+        if (!active) {
+          return;
+        }
+        const nextSession = { token: session.token, user };
+        saveSession(nextSession);
+        setSession(nextSession);
+      })
+      .catch(() => {
+        if (active) {
+          handleLogout();
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.token]);
 
   if (!session) {
     return (
@@ -483,7 +508,13 @@ function Dashboard({
           onClick={openOwnProfile}
           type="button"
         >
-          <div className="brand">{session.user.username.slice(0, 1).toUpperCase()}</div>
+          <div className="brand nav-profile-brand">
+            {session.user.avatar_url ? (
+              <img alt={session.user.username} src={session.user.avatar_url} />
+            ) : (
+              session.user.username.slice(0, 1).toUpperCase()
+            )}
+          </div>
         </button>
         <button aria-label="Главная" className={section === "home" ? "active" : ""} onClick={() => setSection("home")} type="button">
           <Home size={20} />
@@ -519,18 +550,6 @@ function Dashboard({
       </aside>
 
       <section className="content">
-        <header className="topbar">
-          <p>
-            Добро пожаловать, <strong>{session.user.username.toUpperCase()}</strong>
-          </p>
-          <div className="topbar-actions">
-            <input placeholder="Поиск" />
-            <button aria-label="Выйти" onClick={onLogout} type="button">
-              <LogOut size={18} />
-            </button>
-          </div>
-        </header>
-
         {section === "profile" ? (
           <ProfilePanel
             onLogout={onLogout}
@@ -1384,6 +1403,7 @@ function ChatsPanel({
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState<string | null>(null);
   const [previewMediaType, setPreviewMediaType] = React.useState<string>("");
   const [pinnedChatIds, setPinnedChatIds] = React.useState<string[]>(() => readStoredStringList(PINNED_CHATS_STORAGE_KEY));
+  const [pinnedChatsHeight, setPinnedChatsHeight] = React.useState<number>(() => readStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, 220));
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
   const [messagesLoading, setMessagesLoading] = React.useState(false);
@@ -1404,6 +1424,7 @@ function ChatsPanel({
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
   const selectedChatIdRef = React.useRef<string>("");
   const messageRequestRef = React.useRef(0);
+  const pinnedResizeRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
   const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
   const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
 
@@ -1419,6 +1440,8 @@ function ChatsPanel({
       return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime();
     });
   }, [visibleChats, pinnedChatSet]);
+  const pinnedChats = React.useMemo(() => orderedChats.filter((chat) => pinnedChatSet.has(chat.id)), [orderedChats, pinnedChatSet]);
+  const regularChats = React.useMemo(() => orderedChats.filter((chat) => !pinnedChatSet.has(chat.id)), [orderedChats, pinnedChatSet]);
 
   const selectedChat = orderedChats.find((chat) => chat.id === selectedChatId) ?? null;
   const selectedChatMeta = selectedChat ? getChatPresentation(selectedChat, me) : null;
@@ -1522,6 +1545,15 @@ function ChatsPanel({
       if (event.type === "message.new") {
         const incoming = event.message as Message;
         bumpChatActivity(incoming.chat_id, incoming.created_at);
+        const cachedMessages = chatMessagesCacheRef.current[incoming.chat_id];
+        if (cachedMessages && !cachedMessages.some((item) => item.id === incoming.id)) {
+          chatMessagesCacheRef.current[incoming.chat_id] = [...cachedMessages, incoming];
+        }
+        void decodeMessagesForChat(incoming.chat_id, [incoming]).then((decoded) => {
+          if (incoming.chat_id === selectedChatIdRef.current) {
+            setDecodeMap(decoded);
+          }
+        });
         if (incoming.chat_id === selectedChatIdRef.current) {
           setMessages((previous) => {
             if (previous.some((item) => item.id === incoming.id)) {
@@ -1531,28 +1563,41 @@ function ChatsPanel({
             chatMessagesCacheRef.current[incoming.chat_id] = next;
             return next;
           });
-          void decodeMessagesForChat(incoming.chat_id, [incoming]);
         }
         return;
       }
 
       if (event.type === "message.updated") {
         const incoming = event.message as Message;
+        const cachedMessages = chatMessagesCacheRef.current[incoming.chat_id];
+        if (cachedMessages) {
+          chatMessagesCacheRef.current[incoming.chat_id] = cachedMessages.map((item) => (item.id === incoming.id ? incoming : item));
+        }
+        void decodeMessagesForChat(incoming.chat_id, [incoming]).then((decoded) => {
+          if (incoming.chat_id === selectedChatIdRef.current) {
+            setDecodeMap(decoded);
+          }
+        });
         if (incoming.chat_id === selectedChatIdRef.current) {
           setMessages((previous) => {
             const next = previous.map((item) => (item.id === incoming.id ? incoming : item));
             chatMessagesCacheRef.current[incoming.chat_id] = next;
             return next;
           });
-          void decodeMessagesForChat(incoming.chat_id, [incoming]);
         }
         return;
       }
 
       if (event.type === "message.deleted") {
         const deletedChatId = typeof event.chat_id === "string" ? event.chat_id : "";
+        const deletedId = typeof event.message_id === "string" ? event.message_id : "";
+        if (deletedChatId && deletedId && chatMessagesCacheRef.current[deletedChatId]) {
+          chatMessagesCacheRef.current[deletedChatId] = chatMessagesCacheRef.current[deletedChatId].filter((item) => item.id !== deletedId);
+        }
+        if (deletedChatId && deletedId && decodedMessagesCacheRef.current[deletedChatId]) {
+          delete decodedMessagesCacheRef.current[deletedChatId][deletedId];
+        }
         if (deletedChatId === selectedChatIdRef.current) {
-          const deletedId = typeof event.message_id === "string" ? event.message_id : "";
           if (deletedId) {
             setMessages((previous) => {
               const next = previous.filter((item) => item.id !== deletedId);
@@ -1564,9 +1609,6 @@ function ChatsPanel({
               delete next[deletedId];
               return next;
             });
-            if (decodedMessagesCacheRef.current[deletedChatId]) {
-              delete decodedMessagesCacheRef.current[deletedChatId][deletedId];
-            }
           }
         }
         return;
@@ -1607,6 +1649,10 @@ function ChatsPanel({
   }, [pinnedChatIds]);
 
   React.useEffect(() => {
+    writeStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, pinnedChatsHeight);
+  }, [pinnedChatsHeight]);
+
+  React.useEffect(() => {
     writeStoredStringList(HIDDEN_CHATS_STORAGE_KEY, hiddenChatIds);
   }, [hiddenChatIds]);
 
@@ -1615,12 +1661,20 @@ function ChatsPanel({
   }, [messages.length, selectedChatId, scrollToBottom]);
 
   React.useEffect(() => {
-    const chatsToPrefetch = orderedChats.slice(0, 4).map((chat) => chat.id);
-    for (const chatId of chatsToPrefetch) {
-      if (!chatMessagesCacheRef.current[chatId]) {
-        void prefetchChatMessages(chatId);
+    const chatsToPrefetch = orderedChats.slice(0, 8).map((chat) => chat.id);
+    const schedulePrefetch = () => {
+      for (const chatId of chatsToPrefetch) {
+        if (!chatMessagesCacheRef.current[chatId]) {
+          void prefetchChatMessages(chatId);
+        }
       }
+    };
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(schedulePrefetch, { timeout: 1200 });
+      return () => window.cancelIdleCallback(idleId);
     }
+    const timeoutId = setTimeout(schedulePrefetch, 120);
+    return () => clearTimeout(timeoutId);
   }, [orderedChats]);
 
   async function reloadChats() {
@@ -1941,7 +1995,7 @@ function ChatsPanel({
         setStatus("Отправляем сообщение...");
         const sentMessage = await sendEncryptedText(text);
         setMessages((previous) => {
-          const next = previous.map((item) => (item.id === optimisticId ? sentMessage : item));
+          const next = dedupeMessagesById(previous.map((item) => (item.id === optimisticId ? sentMessage : item)));
           chatMessagesCacheRef.current[selectedChatId] = next;
           return next;
         });
@@ -2112,6 +2166,70 @@ function ChatsPanel({
     });
   }
 
+  function handlePinnedResizePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    pinnedResizeRef.current = { startY: event.clientY, startHeight: pinnedChatsHeight };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePinnedResizePointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!pinnedResizeRef.current) {
+      return;
+    }
+    const delta = event.clientY - pinnedResizeRef.current.startY;
+    setPinnedChatsHeight(Math.min(520, Math.max(96, pinnedResizeRef.current.startHeight + delta)));
+  }
+
+  function handlePinnedResizePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    pinnedResizeRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function renderChatRow(chat: Chat) {
+    const chatMeta = getChatPresentation(chat, me);
+    const isPinned = pinnedChatSet.has(chat.id);
+    return (
+      <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
+        <button
+          className="chat-row-main"
+          onClick={() => {
+            setSelectedChatId(chat.id);
+            if (isMobile) {
+              setMobileChatOpen(true);
+            }
+          }}
+          type="button"
+        >
+          <div className="chat-row-avatar">
+            {chatMeta.avatarUrl ? <img alt={chatMeta.title} src={chatMeta.avatarUrl} /> : chatMeta.initials}
+          </div>
+          <div className="chat-row-body">
+            <strong>{chatMeta.title}</strong>
+            <span>{chatMeta.subtitle}</span>
+          </div>
+        </button>
+        <div className="chat-row-actions">
+          <button
+            aria-label={isPinned ? "Открепить чат" : "Закрепить чат"}
+            className="chat-row-icon"
+            onClick={() => handleTogglePin(chat.id)}
+            type="button"
+          >
+            {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+          </button>
+          <button
+            aria-label="Выйти из чата"
+            className="chat-row-icon"
+            onClick={() => void handleLeaveChat(chat)}
+            type="button"
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   async function handleLeaveChat(chat: Chat) {
     const title = getChatPresentation(chat, me).title;
     if (!window.confirm(`Выйти из чата "${title}"?`)) {
@@ -2279,54 +2397,27 @@ function ChatsPanel({
         ) : null}
 
         <div className="chat-list">
-          {orderedChats.map((chat) => {
-            const chatMeta = getChatPresentation(chat, me);
-            const isPinned = pinnedChatSet.has(chat.id);
-            return (
-              <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
-                <button
-                  className="chat-row-main"
-                  onClick={() => {
-                    setSelectedChatId(chat.id);
-                    if (isMobile) {
-                      setMobileChatOpen(true);
-                    }
-                  }}
-                  type="button"
-                >
-                  <div className="chat-row-avatar">
-                    {chatMeta.avatarUrl ? (
-                      <img alt={chatMeta.title} src={chatMeta.avatarUrl} />
-                    ) : (
-                      chatMeta.initials
-                    )}
-                  </div>
-                  <div className="chat-row-body">
-                    <strong>{chatMeta.title}</strong>
-                    <span>{chatMeta.subtitle}</span>
-                  </div>
-                </button>
-                <div className="chat-row-actions">
-                  <button
-                    aria-label={isPinned ? "Открепить чат" : "Закрепить чат"}
-                    className="chat-row-icon"
-                    onClick={() => handleTogglePin(chat.id)}
-                    type="button"
-                  >
-                    {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                  </button>
-                  <button
-                    aria-label="Выйти из чата"
-                    className="chat-row-icon"
-                    onClick={() => void handleLeaveChat(chat)}
-                    type="button"
-                  >
-                    <LogOut size={14} />
-                  </button>
-                </div>
+          {pinnedChats.length > 0 ? (
+            <div className="pinned-chat-section" style={{ height: pinnedChatsHeight }}>
+              <div className="pinned-chat-section-head">
+                <span>Закрепленные</span>
               </div>
-            );
-          })}
+              <div className="pinned-chat-list">{pinnedChats.map(renderChatRow)}</div>
+            </div>
+          ) : null}
+          {pinnedChats.length > 0 ? (
+            <button
+              aria-label="Изменить высоту закрепленных чатов"
+              className="pinned-chat-resizer"
+              onPointerDown={handlePinnedResizePointerDown}
+              onPointerMove={handlePinnedResizePointerMove}
+              onPointerUp={handlePinnedResizePointerUp}
+              type="button"
+            >
+              <span />
+            </button>
+          ) : null}
+          <div className="regular-chat-list">{regularChats.map(renderChatRow)}</div>
           {orderedChats.length === 0 ? <p className="form-status">Чатов пока нет</p> : null}
         </div>
       </div>
@@ -2989,6 +3080,38 @@ function writeStoredStringList(key: string, values: string[]): void {
   } catch {
     // ignore storage write errors
   }
+}
+
+function readStoredNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return fallback;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredNumber(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(Math.round(value)));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+function dedupeMessagesById(items: Message[]): Message[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) {
+      return false;
+    }
+    seen.add(item.id);
+    return true;
+  });
 }
 
 async function fileToDataUrl(file: File): Promise<string> {
