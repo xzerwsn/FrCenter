@@ -1,6 +1,6 @@
 """add composite index for messages chat timeline
 
-Revision ID: 0009_add_messages_chat_created_index
+Revision ID: 0009_msg_chat_created_idx
 Revises: 0008_create_notifications
 Create Date: 2026-04-24
 """
@@ -10,7 +10,7 @@ from typing import Sequence, Union
 from alembic import op
 
 
-revision: str = "0009_add_messages_chat_created_index"
+revision: str = "0009_msg_chat_created_idx"
 down_revision: Union[str, None] = "0008_create_notifications"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
