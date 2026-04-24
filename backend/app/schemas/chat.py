@@ -57,6 +57,7 @@ class ChatResponse(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    unread_count: int = 0
     members: list[ChatMemberResponse]
 
 

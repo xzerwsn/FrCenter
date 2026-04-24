@@ -30,6 +30,7 @@ import {
   deleteChatMessage,
   listChatMessages,
   listChats,
+  markChatRead,
   removeGroupMember,
   sendChatMessage,
   updateGroupChat,
@@ -550,7 +551,7 @@ function Dashboard({
       </aside>
 
       <section className="content">
-        {section === "profile" ? (
+        <div style={{ display: section === "profile" ? "block" : "none" }}>
           <ProfilePanel
             onLogout={onLogout}
             token={session.token}
@@ -558,18 +559,28 @@ function Dashboard({
             sessionUser={session.user}
             onSessionUserUpdate={onSessionUserUpdate}
           />
-        ) : null}
-        {section === "home" ? <HomePanel token={session.token} /> : null}
+        </div>
+        <div style={{ display: section === "home" ? "block" : "none" }}>
+          <HomePanel token={session.token} />
+        </div>
         <div style={{ display: section === "chats" ? "block" : "none" }}>
           <ChatsPanel token={session.token} me={session.user} friends={friends} />
         </div>
-        {section === "friends" ? (
+        <div style={{ display: section === "friends" ? "block" : "none" }}>
           <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
-        ) : null}
-        {section === "notifications" ? <NotificationsPanel /> : null}
-        {section === "games" ? <GamesPanel friends={friends} /> : null}
-        {section === "clips" ? <ClipsPanel friends={friends} /> : null}
-        {section === "settings" ? <SettingsPanel themeId={themeId} onThemeChange={onThemeChange} /> : null}
+        </div>
+        <div style={{ display: section === "notifications" ? "block" : "none" }}>
+          <NotificationsPanel />
+        </div>
+        <div style={{ display: section === "games" ? "block" : "none" }}>
+          <GamesPanel friends={friends} />
+        </div>
+        <div style={{ display: section === "clips" ? "block" : "none" }}>
+          <ClipsPanel friends={friends} />
+        </div>
+        <div style={{ display: section === "settings" ? "block" : "none" }}>
+          <SettingsPanel themeId={themeId} onThemeChange={onThemeChange} />
+        </div>
       </section>
 
       <aside className="friends">
@@ -1507,6 +1518,17 @@ function ChatsPanel({
   }, [isMobile]);
 
   React.useEffect(() => {
+    if (!isMobile || !mobileChatOpen) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobile, mobileChatOpen]);
+
+  React.useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
 
@@ -1555,6 +1577,7 @@ function ChatsPanel({
           }
         });
         if (incoming.chat_id === selectedChatIdRef.current) {
+          void markChatAsRead(incoming.chat_id);
           setMessages((previous) => {
             if (previous.some((item) => item.id === incoming.id)) {
               return previous;
@@ -1563,6 +1586,13 @@ function ChatsPanel({
             chatMessagesCacheRef.current[incoming.chat_id] = next;
             return next;
           });
+          setChats((previous) => previous.map((chat) => (chat.id === incoming.chat_id ? { ...chat, unread_count: 0 } : chat)));
+        } else if (incoming.sender.id !== me.id) {
+          setChats((previous) =>
+            previous.map((chat) =>
+              chat.id === incoming.chat_id ? { ...chat, unread_count: (chat.unread_count ?? 0) + 1, updated_at: incoming.created_at } : chat,
+            ),
+          );
         }
         return;
       }
@@ -1688,6 +1718,15 @@ function ChatsPanel({
     );
   }
 
+  async function markChatAsRead(chatId: string) {
+    try {
+      await markChatRead(token, chatId);
+    } catch {
+      // keep UI responsive if mark-read fails
+    }
+    setChats((previous) => previous.map((chat) => (chat.id === chatId ? { ...chat, unread_count: 0 } : chat)));
+  }
+
   async function decodeMessagesForChat(chatId: string, items: Message[]): Promise<Record<string, string>> {
     const existing = decodedMessagesCacheRef.current[chatId] ?? {};
     const nextDecoded: Record<string, string> = { ...existing };
@@ -1736,6 +1775,7 @@ function ChatsPanel({
       chatMessagesCacheRef.current[chatId] = fetchedMessages;
       setMessages(fetchedMessages);
       setDecodeMap(decoded);
+      await markChatAsRead(chatId);
     } finally {
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
         setMessagesLoading(false);
@@ -2188,6 +2228,10 @@ function ChatsPanel({
   function renderChatRow(chat: Chat) {
     const chatMeta = getChatPresentation(chat, me);
     const isPinned = pinnedChatSet.has(chat.id);
+    const cachedMessages = chatMessagesCacheRef.current[chat.id] ?? [];
+    const lastMessage = cachedMessages.length > 0 ? cachedMessages[cachedMessages.length - 1] : null;
+    const previewText = getChatListPreview(chat, lastMessage, decodedMessagesCacheRef.current[chat.id]);
+    const chatTime = formatChatListTime(lastMessage?.created_at ?? chat.updated_at);
     return (
       <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
         <button
@@ -2204,8 +2248,14 @@ function ChatsPanel({
             {chatMeta.avatarUrl ? <img alt={chatMeta.title} src={chatMeta.avatarUrl} /> : chatMeta.initials}
           </div>
           <div className="chat-row-body">
-            <strong>{chatMeta.title}</strong>
-            <span>{chatMeta.subtitle}</span>
+            <div className="chat-row-line">
+              <strong>{chatMeta.title}</strong>
+              <time>{chatTime}</time>
+            </div>
+            <div className="chat-row-line">
+              <span>{previewText}</span>
+              {chat.unread_count > 0 ? <small className="chat-row-badge">{chat.unread_count}</small> : null}
+            </div>
           </div>
         </button>
         <div className="chat-row-actions">
@@ -3157,6 +3207,32 @@ function formatMessageTime(value: string): string {
     return "";
   }
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatChatListTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function getChatListPreview(
+  chat: Chat,
+  lastMessage: Message | null,
+  decodedMap: Record<string, string> | undefined,
+): string {
+  if (!lastMessage) {
+    return chat.type === "group" ? `${chat.members.length} участника` : "Личный чат";
+  }
+  if (lastMessage.message_type === "media") {
+    return "Вложение";
+  }
+  const decoded = decodedMap?.[lastMessage.id]?.trim();
+  if (!decoded) {
+    return "Новое сообщение";
+  }
+  return decoded.replace(/\s+/g, " ").slice(0, 48);
 }
 
 async function ensureChatKey(chatId: string): Promise<string> {

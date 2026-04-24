@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -51,6 +51,9 @@ async def list_chats(db: AsyncSession, current_user: User) -> list[Chat]:
         .order_by(Chat.updated_at.desc())
     )
     chats = list(result.scalars().unique().all())
+    unread_counts = await _get_unread_counts(db, current_user.id, [chat.id for chat in chats])
+    for chat in chats:
+        setattr(chat, "unread_count", unread_counts.get(chat.id, 0))
     return [_strip_inactive_members(chat) for chat in chats]
 
 
@@ -133,7 +136,27 @@ async def list_messages(db: AsyncSession, current_user: User, chat_id: str) -> l
         .order_by(Message.created_at.asc())
         .limit(100)
     )
+    await mark_chat_read(db, current_user.id, chat_id)
     return list(result.scalars().all())
+
+
+async def mark_chat_read(db: AsyncSession, user_id: str, chat_id: str) -> None:
+    await _ensure_member(db, user_id, chat_id)
+    await db.execute(
+        update(MessageRecipient)
+        .where(
+            MessageRecipient.recipient_user_id == user_id,
+            MessageRecipient.read_at.is_(None),
+            MessageRecipient.message_id.in_(
+                select(Message.id).where(
+                    Message.chat_id == chat_id,
+                    Message.sender_id != user_id,
+                )
+            ),
+        )
+        .values(read_at=datetime.now(UTC), delivery_status="read")
+    )
+    await db.commit()
 
 
 async def get_active_member_ids(db: AsyncSession, chat_id: str) -> list[str]:
@@ -455,6 +478,23 @@ async def _set_group_key_for_active_members(db: AsyncSession, chat_id: str, encr
 async def _get_message_in_chat(db: AsyncSession, chat_id: str, message_id: str) -> Message | None:
     result = await db.execute(select(Message).where(Message.id == message_id, Message.chat_id == chat_id))
     return result.scalar_one_or_none()
+
+
+async def _get_unread_counts(db: AsyncSession, user_id: str, chat_ids: list[str]) -> dict[str, int]:
+    if not chat_ids:
+        return {}
+    result = await db.execute(
+        select(Message.chat_id, func.count(MessageRecipient.id))
+        .join(MessageRecipient, MessageRecipient.message_id == Message.id)
+        .where(
+            Message.chat_id.in_(chat_ids),
+            MessageRecipient.recipient_user_id == user_id,
+            MessageRecipient.read_at.is_(None),
+            Message.sender_id != user_id,
+        )
+        .group_by(Message.chat_id)
+    )
+    return {chat_id: unread_count for chat_id, unread_count in result.all()}
 
 
 def _can_manage_message(actor_role: str, message_sender_id: str, actor_user_id: str) -> bool:

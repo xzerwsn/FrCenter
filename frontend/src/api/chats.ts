@@ -16,6 +16,7 @@ export type Chat = {
   created_by: string;
   created_at: string;
   updated_at: string;
+  unread_count: number;
   members: ChatMember[];
 };
 
@@ -141,6 +142,10 @@ export async function removeGroupMember(
 
 export async function listChatMessages(token: string, chatId: string): Promise<Message[]> {
   return apiGet<Message[]>(`/api/chats/${chatId}/messages`, { token });
+}
+
+export async function markChatRead(token: string, chatId: string): Promise<void> {
+  await apiPost<void>(`/api/chats/${chatId}/read`, {}, { token });
 }
 
 export async function sendChatMessage(

@@ -33,6 +33,7 @@ from app.services.chat_service import (
     get_chat,
     list_chats as list_user_chats,
     list_messages,
+    mark_chat_read,
     update_message,
     delete_message,
     remove_group_member,
@@ -284,5 +285,17 @@ async def create_message(
             },
         )
         return message
+    except NotChatMember as exc:
+        raise HTTPException(status_code=404, detail="Chat not found") from exc
+
+
+@router.post("/{chat_id}/read", status_code=status.HTTP_204_NO_CONTENT)
+async def read_chat_messages(
+    chat_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    try:
+        await mark_chat_read(db, current_user.id, chat_id)
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Chat not found") from exc
