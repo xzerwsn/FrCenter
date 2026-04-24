@@ -126,17 +126,39 @@ async def get_chat(db: AsyncSession, current_user: User, chat_id: str) -> Chat:
     return _strip_inactive_members(chat)
 
 
-async def list_messages(db: AsyncSession, current_user: User, chat_id: str) -> list[Message]:
+async def list_messages(
+    db: AsyncSession,
+    current_user: User,
+    chat_id: str,
+    *,
+    cursor_id: str | None = None,
+    cursor_created_at: datetime | None = None,
+    limit: int = 60,
+) -> tuple[list[Message], str | None, datetime | None, bool]:
     await _ensure_member(db, current_user.id, chat_id)
-    result = await db.execute(
+    query = (
         select(Message)
         .where(Message.chat_id == chat_id)
         .where(Message.expires_at > datetime.now(UTC))
         .options(selectinload(Message.sender))
-        .order_by(Message.created_at.asc())
-        .limit(100)
     )
-    return list(result.scalars().all())
+    if cursor_created_at is not None:
+        query = query.where(
+            (Message.created_at < cursor_created_at)
+            | ((Message.created_at == cursor_created_at) & (Message.id < (cursor_id or "")))
+        )
+
+    safe_limit = max(1, min(limit, 100))
+    result = await db.execute(
+        query.order_by(Message.created_at.desc(), Message.id.desc()).limit(safe_limit + 1)
+    )
+    rows = list(result.scalars().all())
+    has_more = len(rows) > safe_limit
+    page = rows[:safe_limit]
+    page.reverse()
+    next_cursor_id = page[0].id if has_more and page else None
+    next_cursor_created_at = page[0].created_at if has_more and page else None
+    return page, next_cursor_id, next_cursor_created_at, has_more
 
 
 async def mark_chat_read(db: AsyncSession, user_id: str, chat_id: str) -> None:

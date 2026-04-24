@@ -87,5 +87,12 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
 
+class MessageListResponse(BaseModel):
+    messages: list[MessageResponse]
+    next_cursor_id: str | None = None
+    next_cursor_created_at: datetime | None = None
+    has_more: bool = False
+
+
 class ChatListResponse(BaseModel):
     chats: list[ChatResponse]

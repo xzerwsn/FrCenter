@@ -1,5 +1,6 @@
 ﻿import React from "react";
 import ReactDOM from "react-dom/client";
+import type { VirtuosoHandle } from "react-virtuoso";
 import {
   Bell,
   ChevronDown,
@@ -28,6 +29,7 @@ import { confirmEmail, login, logout, register } from "../api/auth";
 import {
   type Chat,
   type Message,
+  type MessageListResponse,
   addGroupMember,
   createDirectChat,
   createGroupChat,
@@ -64,14 +66,11 @@ import {
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
-import {
-  createSharedMessageKey,
-  decryptBytesWithSharedKey,
-  decryptTextWithSharedKey,
-  encryptBytesForSharedKey,
-  encryptTextForSharedKey,
-} from "../crypto/messages";
+import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
+import { decryptCacheEntriesInWorker, decryptMessagesInWorker, encryptCacheEntriesInWorker, generateSharedKeyInWorker } from "../crypto/worker-client";
+import { getCachedDecodedMessages, upsertCachedDecodedMessages } from "./chat-cache";
+import { type MediaPayloadFile, VirtualMessageList } from "./chat-components";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
 
@@ -123,15 +122,6 @@ type MessageContextMenuState = {
   message: Message;
   x: number;
   y: number;
-};
-
-type MediaPayloadFile = {
-  media_id: string;
-  media_url: string;
-  file_name: string;
-  file_size: number;
-  file_mime: string;
-  file_nonce: string;
 };
 
 function App() {
@@ -1823,6 +1813,12 @@ function ChatsPanel({
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [chatsLoading, setChatsLoading] = React.useState<boolean>(() => readStoredChats(me.id).length === 0);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
+  const [messagesHasMore, setMessagesHasMore] = React.useState(false);
+  const [messagesCursor, setMessagesCursor] = React.useState<{ id: string | null; createdAt: string | null }>({
+    id: null,
+    createdAt: null,
+  });
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === "undefined") {
       return false;
@@ -1837,11 +1833,14 @@ function ChatsPanel({
   const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const editAvatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const editBackgroundInputRef = React.useRef<HTMLInputElement | null>(null);
-  const messageListRef = React.useRef<HTMLDivElement | null>(null);
+  const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
   const selectedChatIdRef = React.useRef<string>("");
   const messageRequestRef = React.useRef(0);
+  const olderMessagesRequestRef = React.useRef(0);
+  const skipNextAutoScrollRef = React.useRef(false);
   const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
   const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
+  const chatMessagePageInfoRef = React.useRef<Record<string, { id: string | null; createdAt: string | null; hasMore: boolean }>>({});
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
   const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
@@ -1891,14 +1890,14 @@ function ChatsPanel({
     : undefined;
 
   const scrollToBottom = React.useCallback(() => {
-    const messageListElement = messageListRef.current;
-    if (!messageListElement) {
+    const list = virtuosoRef.current;
+    if (!list || messages.length === 0) {
       return;
     }
     requestAnimationFrame(() => {
-      messageListElement.scrollTop = messageListElement.scrollHeight;
+      list.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "auto" });
     });
-  }, []);
+  }, [messages.length]);
 
   React.useEffect(() => {
     void reloadChats();
@@ -1961,6 +1960,9 @@ function ChatsPanel({
       setMessages([]);
       setDecodeMap({});
       setMessagesLoading(false);
+      setLoadingOlderMessages(false);
+      setMessagesHasMore(false);
+      setMessagesCursor({ id: null, createdAt: null });
       return;
     }
     void loadChatMessages(selectedChatId);
@@ -2095,6 +2097,10 @@ function ChatsPanel({
   }, [me.id, selectedChatId]);
 
   React.useEffect(() => {
+    if (skipNextAutoScrollRef.current) {
+      skipNextAutoScrollRef.current = false;
+      return;
+    }
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
@@ -2146,24 +2152,65 @@ function ChatsPanel({
     setChats((previous) => previous.map((chat) => (chat.id === chatId ? { ...chat, unread_count: 0 } : chat)));
   }
 
+  function getCacheSalt(chatId: string): string {
+    return `frcenter-cache:${me.id}:${chatId}`;
+  }
+
   async function decodeMessagesForChat(chatId: string, items: Message[]): Promise<Record<string, string>> {
     const existing = decodedMessagesCacheRef.current[chatId] ?? {};
     const nextDecoded: Record<string, string> = { ...existing };
     const pendingItems = items.filter((message) => nextDecoded[message.id] === undefined);
     if (pendingItems.length > 0) {
       const key = await ensureChatKey(chatId);
-      const resolvedEntries = await Promise.all(
-        pendingItems.map(async (message) => {
-          try {
-            const plain = await decryptTextWithSharedKey({ ciphertext: message.ciphertext, nonce: message.nonce }, key);
-            return [message.id, plain] as const;
-          } catch {
-            return [message.id, "Не удалось расшифровать сообщение"] as const;
-          }
-        }),
+      const cacheSalt = getCacheSalt(chatId);
+      const cachedEntries = await getCachedDecodedMessages(
+        chatId,
+        pendingItems.map((message) => message.id),
       );
-      for (const [messageId, value] of resolvedEntries) {
-        nextDecoded[messageId] = value;
+      if (cachedEntries.length > 0) {
+        const decryptedCache = await decryptCacheEntriesInWorker(
+          key,
+          cacheSalt,
+          cachedEntries.map((item) => ({
+            id: item.messageId,
+            ciphertext: item.ciphertext,
+            iv: item.iv,
+          })),
+        );
+        for (const item of decryptedCache) {
+          nextDecoded[item.id] = item.plaintext;
+        }
+      }
+      const remainingItems = pendingItems.filter((message) => nextDecoded[message.id] === undefined);
+      if (remainingItems.length > 0) {
+        const decryptedMessages = await decryptMessagesInWorker(
+          key,
+          remainingItems.map((message) => ({
+            id: message.id,
+            ciphertext: message.ciphertext,
+            nonce: message.nonce,
+          })),
+        );
+        for (const item of decryptedMessages) {
+          nextDecoded[item.id] = item.plaintext;
+        }
+        const encryptedCacheItems = await encryptCacheEntriesInWorker(
+          key,
+          cacheSalt,
+          decryptedMessages.map((item) => ({
+            id: item.id,
+            plaintext: item.plaintext,
+          })),
+        );
+        await upsertCachedDecodedMessages(
+          encryptedCacheItems.map((item) => ({
+            chatId,
+            messageId: item.id,
+            ciphertext: item.ciphertext,
+            iv: item.iv,
+            updatedAt: new Date().toISOString(),
+          })),
+        );
       }
     }
     decodedMessagesCacheRef.current[chatId] = nextDecoded;
@@ -2176,9 +2223,15 @@ function ChatsPanel({
 
     const cachedMessages = chatMessagesCacheRef.current[chatId];
     const cachedDecoded = decodedMessagesCacheRef.current[chatId];
+    const cachedPageInfo = chatMessagePageInfoRef.current[chatId];
     if (cachedMessages) {
       setMessages(cachedMessages);
       setDecodeMap(cachedDecoded ?? {});
+      setMessagesHasMore(cachedPageInfo?.hasMore ?? false);
+      setMessagesCursor({
+        id: cachedPageInfo?.id ?? null,
+        createdAt: cachedPageInfo?.createdAt ?? null,
+      });
     } else {
       setMessages([]);
       setDecodeMap({});
@@ -2186,14 +2239,24 @@ function ChatsPanel({
     }
 
     try {
-      const fetchedMessages = await listChatMessages(token, chatId);
-      const decoded = await decodeMessagesForChat(chatId, fetchedMessages);
+      const response = await listChatMessages(token, chatId, { limit: 60 });
+      const decoded = await decodeMessagesForChat(chatId, response.messages);
       if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
         return;
       }
-      chatMessagesCacheRef.current[chatId] = fetchedMessages;
-      setMessages(fetchedMessages);
+      chatMessagesCacheRef.current[chatId] = response.messages;
+      chatMessagePageInfoRef.current[chatId] = {
+        id: response.next_cursor_id,
+        createdAt: response.next_cursor_created_at,
+        hasMore: response.has_more,
+      };
+      setMessages(response.messages);
       setDecodeMap(decoded);
+      setMessagesHasMore(response.has_more);
+      setMessagesCursor({
+        id: response.next_cursor_id,
+        createdAt: response.next_cursor_created_at,
+      });
       await markChatAsRead(chatId);
     } finally {
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
@@ -2207,11 +2270,57 @@ function ChatsPanel({
       return;
     }
     try {
-      const fetchedMessages = await listChatMessages(token, chatId);
-      chatMessagesCacheRef.current[chatId] = fetchedMessages;
-      await decodeMessagesForChat(chatId, fetchedMessages);
+      const response = await listChatMessages(token, chatId, { limit: 40 });
+      chatMessagesCacheRef.current[chatId] = response.messages;
+      chatMessagePageInfoRef.current[chatId] = {
+        id: response.next_cursor_id,
+        createdAt: response.next_cursor_created_at,
+        hasMore: response.has_more,
+      };
+      await decodeMessagesForChat(chatId, response.messages);
     } catch {
       // keep prefetch silent
+    }
+  }
+
+  async function loadOlderMessages() {
+    if (!selectedChatId || loadingOlderMessages || !messagesHasMore || !messagesCursor.createdAt) {
+      return;
+    }
+    const requestId = olderMessagesRequestRef.current + 1;
+    olderMessagesRequestRef.current = requestId;
+    setLoadingOlderMessages(true);
+    try {
+      const response = await listChatMessages(token, selectedChatId, {
+        cursorId: messagesCursor.id,
+        cursorCreatedAt: messagesCursor.createdAt,
+        limit: 60,
+      });
+      if (olderMessagesRequestRef.current !== requestId || selectedChatIdRef.current !== selectedChatId) {
+        return;
+      }
+      const decoded = await decodeMessagesForChat(selectedChatId, response.messages);
+      setDecodeMap((previous) => ({ ...previous, ...decoded }));
+      skipNextAutoScrollRef.current = true;
+      setMessages((previous) => {
+        const next = dedupeMessagesById([...response.messages, ...previous]);
+        chatMessagesCacheRef.current[selectedChatId] = next;
+        return next;
+      });
+      chatMessagePageInfoRef.current[selectedChatId] = {
+        id: response.next_cursor_id,
+        createdAt: response.next_cursor_created_at,
+        hasMore: response.has_more,
+      };
+      setMessagesHasMore(response.has_more);
+      setMessagesCursor({
+        id: response.next_cursor_id,
+        createdAt: response.next_cursor_created_at,
+      });
+    } finally {
+      if (olderMessagesRequestRef.current === requestId) {
+        setLoadingOlderMessages(false);
+      }
     }
   }
 
@@ -2326,7 +2435,7 @@ function ChatsPanel({
     }
     setStatus("Добавляем участника...");
     try {
-      const rotatedKey = await createSharedMessageKey();
+      const rotatedKey = await generateSharedKeyInWorker();
       await addGroupMember(token, selectedChatId, memberUsername.trim(), rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       setMemberUsername("");
@@ -2357,7 +2466,7 @@ function ChatsPanel({
     }
     setStatus("Удаляем участника...");
     try {
-      const rotatedKey = await createSharedMessageKey();
+      const rotatedKey = await generateSharedKeyInWorker();
       await removeGroupMember(token, selectedChatId, userId, rotatedKey);
       localStorage.setItem(`${CHAT_KEY_PREFIX}${selectedChatId}`, rotatedKey);
       await reloadChats();
@@ -3040,55 +3149,35 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        <div className="message-list" ref={messageListRef}>
-          {messagesLoading ? <p className="form-status">Загружаем сообщения...</p> : null}
-          {messages.map((message) => (
-            <div
-              className={`message message-enter ${message.sender.id === me.id ? "mine" : ""}`}
-              key={message.id}
-              onContextMenu={(event) => {
-                if (!canManageMessage(message)) {
-                  return;
-                }
-                event.preventDefault();
-                setContextMenu({
-                  message,
-                  x: event.clientX,
-                  y: event.clientY,
-                });
-              }}
-            >
-              <div className="message-head">
-                <div className="message-author">
-                  <div className="message-avatar">
-                    {message.sender.avatar_url ? (
-                      <img alt={message.sender.username} src={message.sender.avatar_url} />
-                    ) : (
-                      message.sender.username.slice(0, 1).toUpperCase()
-                    )}
-                  </div>
-                  <b>{message.sender.username}</b>
-                </div>
-                <time>{formatMessageTime(message.created_at)}</time>
-              </div>
-              {message.message_type === "media" ? (
-                <MediaMessageView
-                  chatId={selectedChatId}
-                  onMediaReady={scrollToBottom}
-                  onPreview={(url, mediaType) => {
-                    setPreviewMediaUrl(url);
-                    setPreviewMediaType(mediaType);
-                  }}
-                  raw={decodeMap[message.id] ?? ""}
-                  token={token}
-                />
-              ) : (
-                <p>{decodeMap[message.id] ?? ""}</p>
-              )}
-            </div>
-          ))}
-          {selectedChatId && !messagesLoading && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
-        </div>
+        {messagesLoading ? <p className="form-status">Загружаем сообщения...</p> : null}
+        {loadingOlderMessages ? <p className="form-status">Подгружаем предыдущие сообщения...</p> : null}
+        {selectedChatId && !messagesLoading && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
+        {messages.length > 0 ? (
+          <VirtualMessageList
+            canManageMessage={canManageMessage}
+            chatId={selectedChatId}
+            currentUserId={me.id}
+            decodeMap={decodeMap}
+            ensureChatKey={ensureChatKey}
+            hasMore={messagesHasMore}
+            messages={messages}
+            onLoadOlder={() => void loadOlderMessages()}
+            onMediaReady={scrollToBottom}
+            onOpenContextMenu={(message, x, y) =>
+              setContextMenu({
+                message,
+                x,
+                y,
+              })
+            }
+            onPreviewMedia={(url, mediaType) => {
+              setPreviewMediaUrl(url);
+              setPreviewMediaType(mediaType);
+            }}
+            token={token}
+            virtuosoRef={virtuosoRef}
+          />
+        ) : null}
 
         {contextMenu ? (
           <div
@@ -3189,155 +3278,6 @@ function ChatsPanel({
       </div>
     </section>
   );
-}
-function MediaMessageView({
-  chatId,
-  onMediaReady,
-  token,
-  raw,
-  onPreview,
-}: {
-  chatId: string;
-  onMediaReady: () => void;
-  token: string;
-  raw: string;
-  onPreview: (url: string, mediaType: string) => void;
-}) {
-  const mediaPayloadFiles = React.useMemo(() => parseMediaPayloadFiles(raw), [raw]);
-  const [resolvedFiles, setResolvedFiles] = React.useState<Array<{ payload: MediaPayloadFile; url: string }>>([]);
-  const [mediaError, setMediaError] = React.useState<string>("");
-
-  React.useEffect(() => {
-    let active = true;
-    const urlsToRevoke: string[] = [];
-
-    async function resolveMedia() {
-      if (!mediaPayloadFiles || !chatId) {
-        return;
-      }
-      try {
-        const chatKey = await ensureChatKey(chatId);
-        const nextFiles: Array<{ payload: MediaPayloadFile; url: string }> = [];
-        for (const payload of mediaPayloadFiles) {
-          const response = await fetch(payload.media_url, {
-            credentials: "include",
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          });
-          if (!response.ok) {
-            throw new Error(`Не удалось загрузить медиа (${response.status})`);
-          }
-          const encryptedBytes = new Uint8Array(await response.arrayBuffer());
-          const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, payload.file_nonce, chatKey);
-          const safeBytes = new Uint8Array(decryptedBytes.byteLength);
-          safeBytes.set(decryptedBytes);
-          const blob = new Blob([safeBytes.buffer], { type: payload.file_mime || "application/octet-stream" });
-          const fileUrl = URL.createObjectURL(blob);
-          urlsToRevoke.push(fileUrl);
-          nextFiles.push({ payload, url: fileUrl });
-        }
-        if (active) {
-          setResolvedFiles(nextFiles);
-          setMediaError("");
-          onMediaReady();
-        }
-      } catch (error) {
-        if (active) {
-          setMediaError(error instanceof Error ? error.message : "Не удалось показать медиа");
-          setResolvedFiles([]);
-        }
-      }
-    }
-
-    void resolveMedia();
-    return () => {
-      active = false;
-      for (const url of urlsToRevoke) {
-        URL.revokeObjectURL(url);
-      }
-    };
-  }, [chatId, mediaPayloadFiles, onMediaReady, token]);
-
-  if (!mediaPayloadFiles) {
-    return <p>{raw || "..."}</p>;
-  }
-
-  const isGallery = resolvedFiles.length > 1;
-
-  return (
-    <div className={`media-message ${isGallery ? "gallery" : ""}`}>
-      {mediaError ? <p>{mediaError}</p> : null}
-      {!mediaError && resolvedFiles.length === 0 ? <p>Загружаем медиа...</p> : null}
-      {resolvedFiles.map(({ payload, url }) => {
-        const isImage = payload.file_mime.startsWith("image/");
-        const isVideo = payload.file_mime.startsWith("video/");
-        const isAudio = payload.file_mime.startsWith("audio/");
-        return (
-          <div className="media-item" key={payload.media_id || `${payload.file_name}-${payload.file_nonce}`}>
-            {isImage ? (
-              <button className="media-inline-trigger" onClick={() => onPreview(url, payload.file_mime)} type="button">
-                <img alt={payload.file_name} className="media-inline-preview" decoding="async" loading="lazy" src={url} />
-              </button>
-            ) : null}
-            {isVideo ? (
-              <video
-                className="media-inline-video"
-                controls
-                loop
-                muted
-                playsInline
-                preload="metadata"
-                src={url}
-              />
-            ) : null}
-            {isAudio ? <audio className="media-inline-audio" controls src={url} /> : null}
-            {!isImage && !isVideo && !isAudio ? (
-              <a className="media-file-link" download={payload.file_name} href={url} rel="noreferrer" target="_blank">
-                {payload.file_name}
-              </a>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function parseMediaPayloadFiles(raw: string): MediaPayloadFile[] | null {
-  if (!raw) {
-    return null;
-  }
-  try {
-    const payload = JSON.parse(raw) as
-      | { kind?: string; files?: Partial<MediaPayloadFile>[] }
-      | Partial<MediaPayloadFile>;
-    if (payload && typeof payload === "object" && "kind" in payload && payload.kind === "media_batch" && Array.isArray(payload.files)) {
-      const files = payload.files
-        .map((item) => normalizeMediaPayloadFile(item))
-        .filter((item): item is MediaPayloadFile => item !== null);
-      return files.length > 0 ? files : null;
-    }
-    const legacy = normalizeMediaPayloadFile(payload as Partial<MediaPayloadFile>);
-    if (!legacy) {
-      return null;
-    }
-    return [legacy];
-  } catch {
-    return null;
-  }
-}
-
-function normalizeMediaPayloadFile(payload: Partial<MediaPayloadFile> | null | undefined): MediaPayloadFile | null {
-  if (!payload || typeof payload.media_url !== "string" || typeof payload.file_name !== "string") {
-    return null;
-  }
-  return {
-    media_id: payload.media_id ?? "",
-    media_url: payload.media_url,
-    file_name: payload.file_name,
-    file_size: typeof payload.file_size === "number" ? payload.file_size : 0,
-    file_mime: payload.file_mime ?? "application/octet-stream",
-    file_nonce: payload.file_nonce ?? "",
-  };
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {

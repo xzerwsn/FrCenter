@@ -10,11 +10,13 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "dexie": "^4.0.11",
     "libsodium-wrappers": "^0.7.15",
     "libsodium-wrappers-sumo": "^0.8.4",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-virtuoso": "^4.12.5",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   },

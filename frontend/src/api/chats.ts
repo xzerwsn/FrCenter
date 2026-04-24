@@ -35,6 +35,13 @@ export type ChatListResponse = {
   chats: Chat[];
 };
 
+export type MessageListResponse = {
+  messages: Message[];
+  next_cursor_id: string | null;
+  next_cursor_created_at: string | null;
+  has_more: boolean;
+};
+
 export type SendMessagePayload = {
   ciphertext: string;
   nonce: string;
@@ -140,8 +147,27 @@ export async function removeGroupMember(
   );
 }
 
-export async function listChatMessages(token: string, chatId: string): Promise<Message[]> {
-  return apiGet<Message[]>(`/api/chats/${chatId}/messages`, { token });
+export async function listChatMessages(
+  token: string,
+  chatId: string,
+  options: {
+    cursorId?: string | null;
+    cursorCreatedAt?: string | null;
+    limit?: number;
+  } = {},
+): Promise<MessageListResponse> {
+  const params = new URLSearchParams();
+  if (options.cursorId) {
+    params.set("cursor_id", options.cursorId);
+  }
+  if (options.cursorCreatedAt) {
+    params.set("cursor_created_at", options.cursorCreatedAt);
+  }
+  if (typeof options.limit === "number") {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return apiGet<MessageListResponse>(`/api/chats/${chatId}/messages${suffix}`, { token });
 }
 
 export async function markChatRead(token: string, chatId: string): Promise<void> {

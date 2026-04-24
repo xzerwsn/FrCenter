@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -16,6 +18,7 @@ from app.schemas.chat import (
     GroupChatCreate,
     GroupChatUpdateRequest,
     MessageResponse,
+    MessageListResponse,
     MessageSendRequest,
     MessageUpdateRequest,
 )
@@ -245,14 +248,30 @@ async def read_chat(
         raise HTTPException(status_code=404, detail="Chat not found") from exc
 
 
-@router.get("/{chat_id}/messages", response_model=list[MessageResponse])
+@router.get("/{chat_id}/messages", response_model=MessageListResponse)
 async def read_messages(
     chat_id: str,
+    cursor_id: str | None = Query(default=None),
+    cursor_created_at: datetime | None = Query(default=None),
+    limit: int = Query(default=60, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[Message]:
+) -> MessageListResponse:
     try:
-        return await list_messages(db, current_user, chat_id)
+        messages, next_cursor_id, next_cursor_created_at, has_more = await list_messages(
+            db,
+            current_user,
+            chat_id,
+            cursor_id=cursor_id,
+            cursor_created_at=cursor_created_at,
+            limit=limit,
+        )
+        return MessageListResponse(
+            messages=[MessageResponse.model_validate(message) for message in messages],
+            next_cursor_id=next_cursor_id,
+            next_cursor_created_at=next_cursor_created_at,
+            has_more=has_more,
+        )
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Chat not found") from exc
 
