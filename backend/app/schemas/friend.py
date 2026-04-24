@@ -24,6 +24,11 @@ class FriendListResponse(BaseModel):
     friends: list[UserPublicResponse]
 
 
+class FriendRequestListResponse(BaseModel):
+    incoming: list[FriendRequestResponse]
+    outgoing: list[FriendRequestResponse]
+
+
 class InviteCodeCreate(BaseModel):
     max_uses: int = Field(default=1, ge=1, le=50)
 

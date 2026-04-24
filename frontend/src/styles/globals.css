@@ -918,6 +918,50 @@ button:disabled {
   min-height: 54px;
 }
 
+.settings-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.settings-input-row input[type="text"],
+.settings-input-row input:not([type]),
+.settings-input-row input[type="range"] {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.settings-input-row input[type="text"],
+.settings-input-row input:not([type]) {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  color: var(--color-text);
+  background: var(--color-surface-strong);
+}
+
+.settings-save-button,
+.notification-card-actions button,
+.notification-read-button {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 16px;
+  color: var(--color-button-text);
+  background: var(--color-accent);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.settings-save-button {
+  margin-top: 14px;
+}
+
+.settings-status {
+  margin-top: 10px;
+  min-height: 22px;
+  visibility: hidden;
+}
+
 .friends-notifications-button {
   width: 42px;
   height: 42px;
@@ -1013,6 +1057,78 @@ button:disabled {
 
 .friends-notification-empty p {
   margin: 0;
+}
+
+.notifications-modal {
+  position: relative;
+  overflow: hidden;
+}
+
+.holo-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgb(157 230 255 / 88%), rgb(244 143 255 / 68%), rgb(152 255 206 / 78%));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.notifications-modal-list {
+  display: grid;
+  gap: 12px;
+  max-height: min(72vh, 620px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.notification-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--color-input) 84%, transparent);
+}
+
+.notification-card.unread {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent-2) 38%, transparent);
+}
+
+.notification-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-card-head strong {
+  color: var(--color-text);
+}
+
+.notification-card-head time {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.notification-card p {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.45;
+}
+
+.notification-card-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.notification-card-actions .secondary {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface-strong) 88%, transparent);
 }
 
 .chat-band {
@@ -1928,6 +2044,36 @@ button:disabled {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.friends-notifications-dock {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 18px;
+  color: var(--color-button-text);
+  background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent-2) 72%, var(--color-accent) 28%));
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgb(0 0 0 / 18%);
+}
+
+.friends-notifications-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: #ff4d8d;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .home-feed-grid {

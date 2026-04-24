@@ -63,6 +63,8 @@ function normalizeStoredUser(raw: unknown): CurrentUser {
     avatar_url: typeof user.avatar_url === "string" ? user.avatar_url : null,
     status: typeof user.status === "string" ? user.status : "offline",
     current_game: typeof user.current_game === "string" ? user.current_game : null,
+    notification_sound_url: typeof user.notification_sound_url === "string" ? user.notification_sound_url : null,
+    notification_volume: typeof user.notification_volume === "number" ? user.notification_volume : 0.7,
     created_at: typeof user.created_at === "string" ? user.created_at : "",
     updated_at: typeof user.updated_at === "string" ? user.updated_at : "",
   };

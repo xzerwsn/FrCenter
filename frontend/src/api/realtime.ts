@@ -17,6 +17,10 @@ export type RealtimeEvent =
       message_id: string;
     }
   | {
+      type: "notification.new";
+      notification: unknown;
+    }
+  | {
       type: string;
       [key: string]: unknown;
     };

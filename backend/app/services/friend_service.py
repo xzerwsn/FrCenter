@@ -4,8 +4,10 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.websocket import connection_manager
 from app.models.friend import FriendRequest, Friendship, InviteCode
 from app.models.user import User
+from app.services.notification_service import create_notification, serialize_notification
 
 PERSONAL_INVITE_MAX_USES = 1_000_000
 
@@ -83,7 +85,35 @@ async def create_friend_request(db: AsyncSession, current_user: User, username: 
     request = FriendRequest(from_user_id=current_user.id, to_user_id=target.id)
     db.add(request)
     await db.commit()
-    return await _get_request_by_id(db, request.id)
+    created = await _get_request_by_id(db, request.id)
+    if created is None:
+        raise FriendRequestAlreadyExists
+    notification = await create_notification(
+        db,
+        user_id=target.id,
+        kind="friend_request",
+        title="Новая заявка в друзья",
+        body=f"@{current_user.username} хочет добавить вас в друзья",
+        data={
+            "request_id": created.id,
+            "from_user": {
+                "id": current_user.id,
+                "username": current_user.username,
+                "display_name": current_user.display_name,
+                "avatar_url": current_user.avatar_url,
+            },
+        },
+        dedupe_key=f"friend-request:{created.id}",
+    )
+    await db.commit()
+    await connection_manager.send_to_user(
+        target.id,
+        {
+            "type": "notification.new",
+            "notification": serialize_notification(notification),
+        },
+    )
+    return created
 
 
 async def accept_friend_request(db: AsyncSession, current_user: User, request_id: str) -> FriendRequest:
@@ -97,7 +127,64 @@ async def accept_friend_request(db: AsyncSession, current_user: User, request_id
 
     request.status = "accepted"
     await db.commit()
-    return await _get_request_by_id(db, request.id)
+    updated = await _get_request_by_id(db, request.id)
+    if updated is None:
+        raise FriendRequestNotFound
+    notification = await create_notification(
+        db,
+        user_id=updated.from_user_id,
+        kind="friend_request_accepted",
+        title="Заявка принята",
+        body=f"@{current_user.username} принял(а) вашу заявку в друзья",
+        data={
+            "request_id": updated.id,
+            "friend": {
+                "id": current_user.id,
+                "username": current_user.username,
+                "display_name": current_user.display_name,
+                "avatar_url": current_user.avatar_url,
+            },
+        },
+        dedupe_key=f"friend-request-accepted:{updated.id}",
+    )
+    await db.commit()
+    await connection_manager.send_to_user(
+        updated.from_user_id,
+        {
+            "type": "notification.new",
+            "notification": serialize_notification(notification),
+        },
+    )
+    return updated
+
+
+async def decline_friend_request(db: AsyncSession, current_user: User, request_id: str) -> FriendRequest:
+    request = await _get_request_by_id(db, request_id)
+    if request is None or request.to_user_id != current_user.id or request.status != "pending":
+        raise FriendRequestNotFound
+
+    request.status = "declined"
+    await db.commit()
+    updated = await _get_request_by_id(db, request.id)
+    if updated is None:
+        raise FriendRequestNotFound
+    return updated
+
+
+async def list_friend_requests(db: AsyncSession, current_user: User) -> tuple[list[FriendRequest], list[FriendRequest]]:
+    incoming_result = await db.execute(
+        select(FriendRequest)
+        .options(selectinload(FriendRequest.from_user), selectinload(FriendRequest.to_user))
+        .where(FriendRequest.to_user_id == current_user.id, FriendRequest.status == "pending")
+        .order_by(FriendRequest.created_at.desc())
+    )
+    outgoing_result = await db.execute(
+        select(FriendRequest)
+        .options(selectinload(FriendRequest.from_user), selectinload(FriendRequest.to_user))
+        .where(FriendRequest.from_user_id == current_user.id, FriendRequest.status == "pending")
+        .order_by(FriendRequest.created_at.desc())
+    )
+    return list(incoming_result.scalars().all()), list(outgoing_result.scalars().all())
 
 
 async def create_invite_code(db: AsyncSession, current_user: User, max_uses: int) -> InviteCode:

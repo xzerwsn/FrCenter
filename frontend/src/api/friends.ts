@@ -14,6 +14,11 @@ export type FriendRequestResponse = {
   updated_at: string;
 };
 
+export type FriendRequestListResponse = {
+  incoming: FriendRequestResponse[];
+  outgoing: FriendRequestResponse[];
+};
+
 export type InviteCodeResponse = {
   code: string;
   max_uses: number;
@@ -32,6 +37,18 @@ export async function listFriends(token: string): Promise<FriendListResponse> {
 
 export async function sendFriendRequest(token: string, username: string): Promise<FriendRequestResponse> {
   return apiPost<FriendRequestResponse>("/api/friends/request", { username }, { token });
+}
+
+export async function listFriendRequests(token: string): Promise<FriendRequestListResponse> {
+  return apiGet<FriendRequestListResponse>("/api/friends/requests", { token });
+}
+
+export async function acceptFriendRequest(token: string, requestId: string): Promise<FriendRequestResponse> {
+  return apiPost<FriendRequestResponse>(`/api/friends/accept/${requestId}`, {}, { token });
+}
+
+export async function declineFriendRequest(token: string, requestId: string): Promise<FriendRequestResponse> {
+  return apiPost<FriendRequestResponse>(`/api/friends/decline/${requestId}`, {}, { token });
 }
 
 export async function createInviteCode(token: string, maxUses = 1): Promise<InviteCodeResponse> {

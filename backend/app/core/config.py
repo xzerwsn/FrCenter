@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     email_confirmation_expire_minutes: int = 30
     sql_echo: bool = False
     auto_create_tables: bool = False
+    deploy_notification_key: str = ""
+    deploy_notification_title: str = "Обновление сайта"
+    deploy_notification_body: str = ""
+    deploy_notification_has_changes: bool = False
 
     @field_validator("database_url", mode="before")
     @classmethod

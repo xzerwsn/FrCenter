@@ -8,6 +8,7 @@ from app.schemas.friend import (
     AddByInviteCodeRequest,
     FriendListResponse,
     FriendRequestCreate,
+    FriendRequestListResponse,
     FriendRequestResponse,
     InviteCodeCreate,
     InviteCodeResponse,
@@ -23,6 +24,8 @@ from app.services.friend_service import (
     add_by_invite_code,
     create_friend_request,
     create_invite_code,
+    decline_friend_request,
+    list_friend_requests,
     list_friends as list_user_friends,
 )
 
@@ -36,6 +39,15 @@ async def list_friends(
 ) -> FriendListResponse:
     friends = await list_user_friends(db, current_user)
     return FriendListResponse(friends=friends)
+
+
+@router.get("/requests", response_model=FriendRequestListResponse)
+async def get_requests(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FriendRequestListResponse:
+    incoming, outgoing = await list_friend_requests(db, current_user)
+    return FriendRequestListResponse(incoming=incoming, outgoing=outgoing)
 
 
 @router.post("/request", response_model=FriendRequestResponse, status_code=status.HTTP_201_CREATED)
@@ -64,6 +76,18 @@ async def accept_request(
 ) -> FriendRequestResponse:
     try:
         return await accept_friend_request(db, current_user, request_id)
+    except FriendRequestNotFound as exc:
+        raise HTTPException(status_code=404, detail="Заявка не найдена") from exc
+
+
+@router.post("/decline/{request_id}", response_model=FriendRequestResponse)
+async def decline_request(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FriendRequestResponse:
+    try:
+        return await decline_friend_request(db, current_user, request_id)
     except FriendRequestNotFound as exc:
         raise HTTPException(status_code=404, detail="Заявка не найдена") from exc
 

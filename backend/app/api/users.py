@@ -37,6 +37,8 @@ def _to_user_me_response(user: User) -> UserMeResponse:
             "avatar_url": user.avatar_url,
             "status": user.status,
             "current_game": user.current_game,
+            "notification_sound_url": user.notification_sound_url,
+            "notification_volume": user.notification_volume,
             "created_at": user.created_at,
             "updated_at": user.updated_at,
         }
@@ -92,6 +94,12 @@ async def update_me(
     if "profile_photos" in updates:
         photos = _normalize_profile_photos(updates["profile_photos"] or [])
         current_user.profile_photos = json.dumps([item.model_dump() for item in photos], ensure_ascii=False)
+    if "status" in updates and updates["status"]:
+        current_user.status = updates["status"]
+    if "notification_sound_url" in updates:
+        current_user.notification_sound_url = updates["notification_sound_url"]
+    if "notification_volume" in updates and updates["notification_volume"] is not None:
+        current_user.notification_volume = updates["notification_volume"]
     try:
         await db.commit()
     except IntegrityError as exc:

@@ -6,13 +6,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
-from app.db.session import init_db
+from app.db.session import AsyncSessionLocal, init_db
+from app.services.notification_service import create_deploy_notifications
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if settings.auto_create_tables:
         await init_db()
+    if (
+        settings.deploy_notification_has_changes
+        and settings.deploy_notification_key
+        and settings.deploy_notification_body
+    ):
+        async with AsyncSessionLocal() as db:
+            await create_deploy_notifications(
+                db,
+                title=settings.deploy_notification_title,
+                body=settings.deploy_notification_body,
+                deployment_key=settings.deploy_notification_key,
+            )
     yield
 
 

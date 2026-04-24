@@ -25,6 +25,8 @@ class UserMeResponse(BaseModel):
     avatar_url: str | None
     status: str
     current_game: str | None
+    notification_sound_url: str | None
+    notification_volume: float
     created_at: datetime
     updated_at: datetime
 
@@ -56,3 +58,6 @@ class UserMeUpdateRequest(BaseModel):
     profile_background_url: str | None = None
     avatar_ring_style: str | None = Field(default=None, max_length=32)
     profile_photos: list[ProfilePhotoItem] | None = Field(default=None, max_length=30)
+    status: str | None = Field(default=None, max_length=32)
+    notification_sound_url: str | None = None
+    notification_volume: float | None = Field(default=None, ge=0, le=1)

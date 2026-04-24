@@ -20,6 +20,8 @@ export type CurrentUser = {
   avatar_url: string | null;
   status: string;
   current_game: string | null;
+  notification_sound_url: string | null;
+  notification_volume: number;
   created_at: string;
   updated_at: string;
 };
@@ -45,6 +47,8 @@ export type CurrentUserUpdatePayload = {
   nickname?: string | null;
   profile_status?: string | null;
   status?: string | null;
+  notification_sound_url?: string | null;
+  notification_volume?: number | null;
   avatar_url?: string | null;
   profile_banner_url?: string | null;
   profile_background_url?: string | null;

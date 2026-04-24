@@ -42,9 +42,25 @@ import {
   updateGroupMemberRole,
 } from "../api/chats";
 import { registerDevice } from "../api/devices";
-import { addFriendByCode, createInviteCode, listFriends, searchUsers, sendFriendRequest } from "../api/friends";
+import {
+  acceptFriendRequest,
+  addFriendByCode,
+  createInviteCode,
+  declineFriendRequest,
+  listFriendRequests,
+  listFriends,
+  searchUsers,
+  sendFriendRequest,
+  type FriendRequestResponse,
+} from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
 import { uploadEncryptedMedia } from "../api/media";
+import {
+  listNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type AppNotification,
+} from "../api/notifications";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
@@ -70,6 +86,7 @@ const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
 const SELECTED_CHAT_STORAGE_KEY_PREFIX = "frcenter.selectedChat.";
+const DEFAULT_NOTIFICATION_SOUND_URL = "https://www.myinstants.com/media/sounds/hell_AJWSn3e.mp3";
 
 type SiteTheme = {
   id: string;
@@ -461,9 +478,23 @@ function Dashboard({
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
   const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() => [loadStoredDashboardSection()]);
+  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
+  const [notifications, setNotifications] = React.useState<AppNotification[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = React.useState(0);
+  const [friendRequests, setFriendRequests] = React.useState<FriendRequestResponse[]>([]);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const visibleNotifications = React.useMemo(
+    () => notifications.filter((item) => item.kind !== "friend_request"),
+    [notifications],
+  );
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
+  }, [session.token]);
+
+  React.useEffect(() => {
+    void refreshNotifications();
+    void refreshFriendRequests();
   }, [session.token]);
 
   React.useEffect(() => {
@@ -537,6 +568,35 @@ function Dashboard({
     setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
   }, [section]);
 
+  React.useEffect(() => {
+    const socket = connectRealtime(session.token, (event: RealtimeEvent) => {
+      if (event.type !== "notification.new" || !event.notification || typeof event.notification !== "object") {
+        return;
+      }
+      const incoming = event.notification as AppNotification;
+      setNotifications((current) => [incoming, ...current.filter((item) => item.id !== incoming.id)].slice(0, 50));
+      setUnreadNotifications((current) => current + (incoming.is_read ? 0 : 1));
+      if (audioRef.current && session.user.notification_sound_url) {
+        audioRef.current.currentTime = 0;
+        void audioRef.current.play().catch(() => {
+          // Ignore autoplay restrictions until the user interacts with the page.
+        });
+      }
+      if (incoming.kind === "friend_request") {
+        void refreshFriendRequests();
+      }
+    });
+    return () => socket.close();
+  }, [session.token, session.user.notification_sound_url]);
+
+  React.useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
+    }
+    audioRef.current.src = session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL;
+    audioRef.current.volume = Math.max(0, Math.min(1, session.user.notification_volume ?? 0.7));
+  }, [session.user.notification_sound_url, session.user.notification_volume]);
+
   function openOwnProfile() {
     setSelectedProfile(null);
     setSection("profile");
@@ -545,6 +605,70 @@ function Dashboard({
   function openFriendProfile(friend: UserPublic) {
     setSelectedProfile(friend);
     setSection("profile");
+  }
+
+  async function refreshNotifications() {
+    try {
+      const response = await listNotifications(session.token);
+      setNotifications(response.notifications);
+      setUnreadNotifications(response.unread_count);
+    } catch {
+      // keep the dashboard usable even if notifications fail
+    }
+  }
+
+  async function refreshFriendRequests() {
+    try {
+      const response = await listFriendRequests(session.token);
+      setFriendRequests(response.incoming);
+    } catch {
+      // keep the dashboard usable even if friend requests fail
+    }
+  }
+
+  async function handleOpenNotifications() {
+    setNotificationsOpen(true);
+    if (unreadNotifications > 0) {
+      try {
+        await markAllNotificationsRead(session.token);
+        setUnreadNotifications(0);
+        setNotifications((current) =>
+          current.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() })),
+        );
+      } catch {
+        // keep modal open even if read-all fails
+      }
+    }
+  }
+
+  async function handleAcceptFriendRequest(requestId: string) {
+    try {
+      await acceptFriendRequest(session.token, requestId);
+      await Promise.all([refreshFriendRequests(), refreshNotifications()]);
+      const response = await listFriends(session.token);
+      setFriends(response.friends);
+    } catch {
+      // leave the request visible if the action failed
+    }
+  }
+
+  async function handleDeclineFriendRequest(requestId: string) {
+    try {
+      await declineFriendRequest(session.token, requestId);
+      await Promise.all([refreshFriendRequests(), refreshNotifications()]);
+    } catch {
+      // leave the request visible if the action failed
+    }
+  }
+
+  async function handleReadNotification(notificationId: string) {
+    try {
+      const updated = await markNotificationRead(session.token, notificationId);
+      setNotifications((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setUnreadNotifications((current) => Math.max(0, current - 1));
+    } catch {
+      // ignore individual read failures
+    }
   }
 
   return (
@@ -628,12 +752,22 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("settings") ? (
         <div style={{ display: section === "settings" ? "block" : "none" }}>
-          <SettingsPanel themeId={themeId} onThemeChange={onThemeChange} />
+          <SettingsPanel
+            token={session.token}
+            user={session.user}
+            onSessionUserUpdate={onSessionUserUpdate}
+            themeId={themeId}
+            onThemeChange={onThemeChange}
+          />
         </div>
         ) : null}
       </section>
 
       <aside className="friends">
+        <button aria-label="Уведомления" className="friends-notifications-dock" onClick={() => void handleOpenNotifications()} type="button">
+          <Bell size={18} />
+          {unreadNotifications > 0 ? <span className="friends-notifications-badge">{unreadNotifications}</span> : null}
+        </button>
         {friends.map((friend) => (
           <button className="friend" key={friend.id} onClick={() => openFriendProfile(friend)} type="button">
             <div>
@@ -643,6 +777,60 @@ function Dashboard({
           </button>
         ))}
       </aside>
+
+      {notificationsOpen ? (
+        <div className="create-chat-modal-overlay" onClick={() => setNotificationsOpen(false)}>
+          <div className="create-chat-modal notifications-modal holo-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="create-chat-modal-header">
+              <h3>Уведомления</h3>
+              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setNotificationsOpen(false)} type="button">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="notifications-modal-list">
+              {friendRequests.map((request) => (
+                <article className="notification-card actionable" key={`request-${request.id}`}>
+                  <div className="notification-card-head">
+                    <strong>Заявка в друзья</strong>
+                    <time>{formatChatListTime(request.created_at)}</time>
+                  </div>
+                  <p>@{request.from_user.username} хочет добавить вас в друзья.</p>
+                  <div className="notification-card-actions">
+                    <button onClick={() => void handleAcceptFriendRequest(request.id)} type="button">
+                      Принять
+                    </button>
+                    <button className="secondary" onClick={() => void handleDeclineFriendRequest(request.id)} type="button">
+                      Отклонить
+                    </button>
+                  </div>
+                </article>
+              ))}
+
+              {visibleNotifications.map((notification) => (
+                <article className={`notification-card ${notification.is_read ? "read" : "unread"}`} key={notification.id}>
+                  <div className="notification-card-head">
+                    <strong>{notification.title}</strong>
+                    <time>{formatChatListTime(notification.created_at)}</time>
+                  </div>
+                  <p>{notification.body}</p>
+                  {!notification.is_read ? (
+                    <button className="notification-read-button" onClick={() => void handleReadNotification(notification.id)} type="button">
+                      Отметить как прочитанное
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+
+              {friendRequests.length === 0 && visibleNotifications.length === 0 ? (
+                <div className="friends-notification-empty">
+                  <Bell size={20} />
+                  <p>Пока уведомлений нет.</p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -1212,15 +1400,43 @@ function ClipsPanel({ friends }: { friends: UserPublic[] }) {
 }
 
 function SettingsPanel({
+  token,
+  user,
+  onSessionUserUpdate,
   themeId,
   onThemeChange,
 }: {
+  token: string;
+  user: CurrentUser;
+  onSessionUserUpdate: (user: CurrentUser) => void;
   themeId: string;
   onThemeChange: (themeId: string) => void;
 }) {
   const [autoStart, setAutoStart] = React.useState(false);
   const [notifEnabled, setNotifEnabled] = React.useState(true);
   const [themesOpen, setThemesOpen] = React.useState(false);
+  const [notificationSoundUrl, setNotificationSoundUrl] = React.useState(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
+  const [notificationVolume, setNotificationVolume] = React.useState(Math.round((user.notification_volume ?? 0.7) * 100));
+  const [settingsStatus, setSettingsStatus] = React.useState("");
+
+  React.useEffect(() => {
+    setNotificationSoundUrl(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
+    setNotificationVolume(Math.round((user.notification_volume ?? 0.7) * 100));
+  }, [user.notification_sound_url, user.notification_volume]);
+
+  async function handleSaveNotificationSettings() {
+    setSettingsStatus("Сохраняем настройки уведомлений...");
+    try {
+      const updated = await updateMe(token, {
+        notification_sound_url: notificationSoundUrl,
+        notification_volume: notificationVolume / 100,
+      });
+      onSessionUserUpdate(updated);
+      setSettingsStatus("Настройки уведомлений сохранены");
+    } catch (error) {
+      setSettingsStatus(error instanceof Error ? error.message : "Не удалось сохранить настройки уведомлений");
+    }
+  }
 
   return (
     <section className="tool-band single-column settings-panel">
@@ -1273,7 +1489,31 @@ function SettingsPanel({
                 </div>
                 <input checked={notifEnabled} onChange={() => setNotifEnabled((value) => !value)} type="checkbox" />
               </label>
+              <label className="settings-toggle-row settings-input-row">
+                <div>
+                  <strong>Звук уведомления</strong>
+                  <span>URL звука, который будет проигрываться при новом уведомлении.</span>
+                </div>
+                <input onChange={(event) => setNotificationSoundUrl(event.target.value)} value={notificationSoundUrl} />
+              </label>
+              <label className="settings-toggle-row settings-input-row">
+                <div>
+                  <strong>Громкость</strong>
+                  <span>{notificationVolume}%</span>
+                </div>
+                <input
+                  max={100}
+                  min={0}
+                  onChange={(event) => setNotificationVolume(Number(event.target.value))}
+                  type="range"
+                  value={notificationVolume}
+                />
+              </label>
             </div>
+            <button className="settings-save-button" onClick={() => void handleSaveNotificationSettings()} type="button">
+              Сохранить уведомления
+            </button>
+            <p className={`form-status settings-status ${settingsStatus ? "visible" : ""}`}>{settingsStatus || " "}</p>
           </section>
         </div>
       </div>
@@ -1331,7 +1571,6 @@ function FriendsPanel({
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
-  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const onlineFriends = React.useMemo(
     () => friends.filter((friend) => normalizeStatus(friend.status) === "online").length,
     [friends],
@@ -1484,14 +1723,6 @@ function FriendsPanel({
               <h3>Добавить друга</h3>
               <p>Результаты поиска и отправка заявки.</p>
             </div>
-            <button
-              aria-label="Открыть уведомления"
-              className="friends-notifications-button"
-              onClick={() => setNotificationsOpen(true)}
-              type="button"
-            >
-              <Bell size={18} />
-            </button>
           </div>
           <div className="friends-result-list">
             {pendingResults.map((user) => (
@@ -1536,23 +1767,6 @@ function FriendsPanel({
 
         <p className={`form-status friends-status ${status ? "visible" : ""}`}>{status || " "}</p>
       </div>
-
-      {notificationsOpen ? (
-        <div className="create-chat-modal-overlay" onClick={() => setNotificationsOpen(false)}>
-          <div className="create-chat-modal friends-notifications-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="create-chat-modal-header">
-              <h3>Уведомления</h3>
-              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setNotificationsOpen(false)} type="button">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="friends-notification-empty">
-              <Bell size={20} />
-              <p>Новых уведомлений пока нет.</p>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }
