@@ -44,6 +44,7 @@ export type CurrentUserUpdatePayload = {
   display_name?: string | null;
   nickname?: string | null;
   profile_status?: string | null;
+  status?: string | null;
   avatar_url?: string | null;
   profile_banner_url?: string | null;
   profile_background_url?: string | null;

@@ -9,7 +9,6 @@ import {
   Home,
   LogOut,
   MessageCircle,
-  Monitor,
   MoreHorizontal,
   Palette,
   Paperclip,
@@ -19,7 +18,6 @@ import {
   PlaySquare,
   Search,
   Settings,
-  Shield,
   UserRound,
   UserPlus,
   Users,
@@ -62,12 +60,11 @@ import { clearSession, loadSession, saveSession, type Session } from "./session"
 import "../styles/globals.css";
 
 type AuthMode = "login" | "register" | "confirm";
-type DashboardSection = "profile" | "home" | "chats" | "friends" | "notifications" | "games" | "clips" | "settings";
+type DashboardSection = "profile" | "home" | "chats" | "friends" | "games" | "clips" | "settings";
 
 const CHAT_KEY_PREFIX = "frcenter.chatKey.";
 const CHATS_CACHE_PREFIX = "frcenter.chatsCache.";
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
-const PINNED_CHATS_HEIGHT_STORAGE_KEY = "frcenter.pinnedChatsHeight";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
@@ -487,6 +484,26 @@ function Dashboard({
   }, [session.token, session.user.id]);
 
   React.useEffect(() => {
+    let active = true;
+    if (session.user.status === "online") {
+      return;
+    }
+    void updateMe(session.token, { status: "online" })
+      .then((user) => {
+        if (!active) {
+          return;
+        }
+        onSessionUserUpdate(user);
+      })
+      .catch(() => {
+        // keep dashboard usable even if presence update fails
+      });
+    return () => {
+      active = false;
+    };
+  }, [onSessionUserUpdate, session.token, session.user.status]);
+
+  React.useEffect(() => {
     if (!selectedProfile || "email" in selectedProfile) {
       return;
     }
@@ -556,14 +573,6 @@ function Dashboard({
         <button aria-label="Друзья" className={section === "friends" ? "active" : ""} onClick={() => setSection("friends")} type="button">
           <Users size={20} />
         </button>
-        <button
-          aria-label="Уведомления"
-          className={section === "notifications" ? "active" : ""}
-          onClick={() => setSection("notifications")}
-          type="button"
-        >
-          <Bell size={20} />
-        </button>
         <button aria-label="Игровая зона" className={section === "games" ? "active" : ""} onClick={() => setSection("games")} type="button">
           <Gamepad2 size={20} />
         </button>
@@ -605,11 +614,6 @@ function Dashboard({
         {mountedSections.includes("friends") ? (
         <div style={{ display: section === "friends" ? "block" : "none" }}>
           <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
-        </div>
-        ) : null}
-        {mountedSections.includes("notifications") ? (
-        <div style={{ display: section === "notifications" ? "block" : "none" }}>
-          <NotificationsPanel />
         </div>
         ) : null}
         {mountedSections.includes("games") ? (
@@ -1156,21 +1160,6 @@ function HomePanel({ token }: { token: string }) {
   );
 }
 
-function NotificationsPanel() {
-  return (
-    <section className="tool-band single-column">
-      <div>
-        <h2>Уведомления</h2>
-        <div className="result-list">
-          <div className="result-row">
-            <span>Новых уведомлений пока нет</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function GamesPanel({ friends }: { friends: UserPublic[] }) {
   return (
     <section className="tool-band">
@@ -1231,9 +1220,10 @@ function SettingsPanel({
 }) {
   const [autoStart, setAutoStart] = React.useState(false);
   const [notifEnabled, setNotifEnabled] = React.useState(true);
+  const [themesOpen, setThemesOpen] = React.useState(false);
 
   return (
-    <section className="tool-band settings-panel">
+    <section className="tool-band single-column settings-panel">
       <div className="settings-main-card">
         <div className="panel-hero panel-hero-settings">
           <span>Settings center</span>
@@ -1249,28 +1239,13 @@ function SettingsPanel({
               </div>
               <div>
                 <h3>Темы</h3>
-                <p>Выбери палитру для всего интерфейса.</p>
+                <p>Открой список палитр и выбери тему для всего интерфейса.</p>
               </div>
             </div>
-            <div className="theme-grid settings-theme-grid">
-              {SITE_THEMES.map((theme) => (
-                <button
-                  className={`theme-card ${themeId === theme.id ? "active" : ""}`}
-                  key={theme.id}
-                  onClick={() => onThemeChange(theme.id)}
-                  type="button"
-                >
-                  <div className="theme-card-swatches">
-                    <span style={{ backgroundColor: theme.background }} />
-                    <span style={{ backgroundColor: theme.surface }} />
-                    <span style={{ backgroundColor: theme.text }} />
-                    <span style={{ backgroundColor: theme.accent }} />
-                    <span style={{ backgroundColor: theme.secondaryAccent }} />
-                  </div>
-                  <strong>{theme.name}</strong>
-                </button>
-              ))}
-            </div>
+            <button className="settings-theme-trigger" onClick={() => setThemesOpen(true)} type="button">
+              <Palette size={18} />
+              <span>Открыть темы</span>
+            </button>
           </section>
 
           <section className="settings-panel-card">
@@ -1303,58 +1278,40 @@ function SettingsPanel({
         </div>
       </div>
 
-      <div className="settings-side-column">
-        <section className="settings-panel-card">
-          <div className="settings-card-head">
-            <div className="settings-card-icon">
-              <Monitor size={18} />
+      {themesOpen ? (
+        <div className="create-chat-modal-overlay" onClick={() => setThemesOpen(false)}>
+          <div className="create-chat-modal settings-themes-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="create-chat-modal-header">
+              <h3>Темы</h3>
+              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setThemesOpen(false)} type="button">
+                <X size={16} />
+              </button>
             </div>
-            <div>
-              <h3>Система</h3>
-              <p>Небольшие подсказки по интерфейсу и цветам.</p>
-            </div>
-          </div>
-          <div className="settings-note-list">
-            <div className="settings-note-row">
-              <span>1</span>
-              <p>Фон сайта и большая подложка интерфейса.</p>
-            </div>
-            <div className="settings-note-row">
-              <span>2</span>
-              <p>Карточки, панели и контейнеры поверх фона.</p>
-            </div>
-            <div className="settings-note-row">
-              <span>3</span>
-              <p>Текст, подписи и иконки основного слоя.</p>
-            </div>
-            <div className="settings-note-row">
-              <span>4</span>
-              <p>Кнопки, ссылки и активные элементы.</p>
-            </div>
-            <div className="settings-note-row">
-              <span>5</span>
-              <p>Hover-состояния, обводки и вспомогательные бейджи.</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="settings-panel-card">
-          <div className="settings-card-head">
-            <div className="settings-card-icon">
-              <Shield size={18} />
-            </div>
-            <div>
-              <h3>Безопасность</h3>
-              <p>Что уже работает в клиенте по умолчанию.</p>
+            <div className="theme-grid settings-theme-grid">
+              {SITE_THEMES.map((theme) => (
+                <button
+                  className={`theme-card ${themeId === theme.id ? "active" : ""}`}
+                  key={theme.id}
+                  onClick={() => {
+                    onThemeChange(theme.id);
+                    setThemesOpen(false);
+                  }}
+                  type="button"
+                >
+                  <div className="theme-card-swatches">
+                    <span style={{ backgroundColor: theme.background }} />
+                    <span style={{ backgroundColor: theme.surface }} />
+                    <span style={{ backgroundColor: theme.text }} />
+                    <span style={{ backgroundColor: theme.accent }} />
+                    <span style={{ backgroundColor: theme.secondaryAccent }} />
+                  </div>
+                  <strong>{theme.name}</strong>
+                </button>
+              ))}
             </div>
           </div>
-          <div className="settings-security-list">
-            <div className="settings-security-chip">Сквозное шифрование включено автоматически</div>
-            <div className="settings-security-chip">Ключи создаются локально на устройстве</div>
-            <div className="settings-security-chip">Обновление ключей не требует ручных действий</div>
-          </div>
-        </section>
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1374,6 +1331,7 @@ function FriendsPanel({
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const onlineFriends = React.useMemo(
     () => friends.filter((friend) => normalizeStatus(friend.status) === "online").length,
     [friends],
@@ -1526,6 +1484,14 @@ function FriendsPanel({
               <h3>Добавить друга</h3>
               <p>Результаты поиска и отправка заявки.</p>
             </div>
+            <button
+              aria-label="Открыть уведомления"
+              className="friends-notifications-button"
+              onClick={() => setNotificationsOpen(true)}
+              type="button"
+            >
+              <Bell size={18} />
+            </button>
           </div>
           <div className="friends-result-list">
             {pendingResults.map((user) => (
@@ -1570,6 +1536,23 @@ function FriendsPanel({
 
         <p className={`form-status friends-status ${status ? "visible" : ""}`}>{status || " "}</p>
       </div>
+
+      {notificationsOpen ? (
+        <div className="create-chat-modal-overlay" onClick={() => setNotificationsOpen(false)}>
+          <div className="create-chat-modal friends-notifications-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="create-chat-modal-header">
+              <h3>Уведомления</h3>
+              <button aria-label="Закрыть" className="create-chat-modal-close" onClick={() => setNotificationsOpen(false)} type="button">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="friends-notification-empty">
+              <Bell size={20} />
+              <p>Новых уведомлений пока нет.</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1606,7 +1589,6 @@ function ChatsPanel({
   const [previewMediaUrl, setPreviewMediaUrl] = React.useState<string | null>(null);
   const [previewMediaType, setPreviewMediaType] = React.useState<string>("");
   const [pinnedChatIds, setPinnedChatIds] = React.useState<string[]>(() => readStoredStringList(PINNED_CHATS_STORAGE_KEY));
-  const [pinnedChatsHeight, setPinnedChatsHeight] = React.useState<number>(() => readStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, 220));
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
@@ -1629,7 +1611,6 @@ function ChatsPanel({
   const messageListRef = React.useRef<HTMLDivElement | null>(null);
   const selectedChatIdRef = React.useRef<string>("");
   const messageRequestRef = React.useRef(0);
-  const pinnedResizeRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
   const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
   const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
 
@@ -1871,10 +1852,6 @@ function ChatsPanel({
   React.useEffect(() => {
     writeStoredStringList(PINNED_CHATS_STORAGE_KEY, pinnedChatIds);
   }, [pinnedChatIds]);
-
-  React.useEffect(() => {
-    writeStoredNumber(PINNED_CHATS_HEIGHT_STORAGE_KEY, pinnedChatsHeight);
-  }, [pinnedChatsHeight]);
 
   React.useEffect(() => {
     writeStoredStringList(HIDDEN_CHATS_STORAGE_KEY, hiddenChatIds);
@@ -2422,25 +2399,6 @@ function ChatsPanel({
     });
   }
 
-  function handlePinnedResizePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    pinnedResizeRef.current = { startY: event.clientY, startHeight: pinnedChatsHeight };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-
-  function handlePinnedResizePointerMove(event: React.PointerEvent<HTMLButtonElement>) {
-    if (!pinnedResizeRef.current) {
-      return;
-    }
-    const delta = event.clientY - pinnedResizeRef.current.startY;
-    setPinnedChatsHeight(Math.min(520, Math.max(96, pinnedResizeRef.current.startHeight + delta)));
-  }
-
-  function handlePinnedResizePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
-    pinnedResizeRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-
   function renderChatRow(chat: Chat) {
     const chatMeta = getChatPresentation(chat, me);
     const isPinned = pinnedChatSet.has(chat.id);
@@ -2664,24 +2622,12 @@ function ChatsPanel({
 
         <div className="chat-list">
           {pinnedChats.length > 0 ? (
-            <div className="pinned-chat-section" style={{ height: pinnedChatsHeight }}>
+            <div className="pinned-chat-section">
               <div className="pinned-chat-section-head">
                 <span>Закрепленные</span>
               </div>
               <div className="pinned-chat-list">{pinnedChats.map(renderChatRow)}</div>
             </div>
-          ) : null}
-          {pinnedChats.length > 0 ? (
-            <button
-              aria-label="Изменить высоту закрепленных чатов"
-              className="pinned-chat-resizer"
-              onPointerDown={handlePinnedResizePointerDown}
-              onPointerMove={handlePinnedResizePointerMove}
-              onPointerUp={handlePinnedResizePointerUp}
-              type="button"
-            >
-              <span />
-            </button>
           ) : null}
           <div className="regular-chat-list">{regularChats.map(renderChatRow)}</div>
           {chatsLoading && orderedChats.length === 0 ? <p className="form-status">Загружаем чаты...</p> : null}
@@ -3236,7 +3182,6 @@ function isDashboardSection(value: string): value is DashboardSection {
     value === "home" ||
     value === "chats" ||
     value === "friends" ||
-    value === "notifications" ||
     value === "games" ||
     value === "clips" ||
     value === "settings"
@@ -3402,27 +3347,6 @@ function writeStoredSelectedChatId(userId: string, chatId: string): void {
 function writeStoredChats(userId: string, chats: Chat[]): void {
   try {
     localStorage.setItem(`${CHATS_CACHE_PREFIX}${userId}`, JSON.stringify(chats));
-  } catch {
-    // ignore storage write errors
-  }
-}
-
-function readStoredNumber(key: string, fallback: number): number {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      return fallback;
-    }
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStoredNumber(key: string, value: number): void {
-  try {
-    localStorage.setItem(key, String(Math.round(value)));
   } catch {
     // ignore storage write errors
   }
