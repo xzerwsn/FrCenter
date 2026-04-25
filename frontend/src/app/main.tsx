@@ -35,6 +35,7 @@ import {
   deleteChatMessage,
   listChatMessages,
   listChats,
+  readChat,
   markChatRead,
   removeGroupMember,
   sendChatMessage,
@@ -63,8 +64,14 @@ import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
-import { decryptCacheEntriesInWorker, decryptMessagesInWorker, encryptCacheEntriesInWorker, generateSharedKeyInWorker } from "../crypto/worker-client";
-import { getCachedDecodedMessages, upsertCachedDecodedMessages } from "./chat-cache";
+import {
+  decryptCacheEntriesInWorker,
+  decryptMessagesInWorker,
+  encryptCacheEntriesInWorker,
+  generateSharedKeyInWorker,
+  resetCryptoWorkerSession,
+} from "../crypto/worker-client";
+import { clearDecodedMessagesCache, getCachedDecodedMessages, pruneDecodedMessages, upsertCachedDecodedMessages } from "./chat-cache";
 import { type MediaPayloadFile, VirtualMessageList } from "./chat-components";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import "../styles/globals.css";
@@ -159,6 +166,7 @@ function App() {
   const [devCode, setDevCode] = React.useState<string | null>(null);
   const [themeId, setThemeId] = React.useState<string>(() => loadStoredThemeId());
   const [authBootstrapDone, setAuthBootstrapDone] = React.useState<boolean>(() => loadSession() !== null);
+  const previousSessionUserIdRef = React.useRef<string>("");
   const activeTheme = React.useMemo(() => SITE_THEMES.find((theme) => theme.id === themeId) ?? SITE_THEMES[0], [themeId]);
 
   React.useEffect(() => {
@@ -180,11 +188,43 @@ function App() {
         // Ignore logout transport failures and still close the local shell.
       })
       .finally(() => {
+        void resetCryptoWorkerSession();
+        void clearDecodedMessagesCache();
         clearSession();
         setSession(null);
         setAuthBootstrapDone(true);
       });
   }
+
+  React.useEffect(() => {
+    const currentUserId = session?.user.id ?? "";
+    if (!currentUserId) {
+      previousSessionUserIdRef.current = "";
+      return;
+    }
+    if (previousSessionUserIdRef.current && previousSessionUserIdRef.current !== currentUserId) {
+      void resetCryptoWorkerSession();
+      void clearDecodedMessagesCache();
+    }
+    previousSessionUserIdRef.current = currentUserId;
+  }, [session?.user.id]);
+
+  React.useEffect(() => {
+    if (!session) {
+      return;
+    }
+    const runMaintenance = () => {
+      void pruneDecodedMessages();
+    };
+    if ("requestIdleCallback" in window) {
+      const requestIdle = window.requestIdleCallback.bind(window);
+      const cancelIdle = window.cancelIdleCallback.bind(window);
+      const idleId = requestIdle(runMaintenance, { timeout: 1500 });
+      return () => cancelIdle(idleId);
+    }
+    const timeoutId = setTimeout(runMaintenance, 300);
+    return () => clearTimeout(timeoutId);
+  }, [session?.user.id]);
 
   React.useEffect(() => {
     if (session) {
@@ -1845,10 +1885,13 @@ function ChatsPanel({
   const selectedChat = orderedChats.find((chat) => chat.id === selectedChatId) ?? null;
   const selectedChatMeta = selectedChat ? getChatPresentation(selectedChat, me) : null;
   const selectedDirectPeer = React.useMemo(
-    () => (selectedChat?.type === "direct" ? selectedChat.members.find((member) => member.user.id !== me.id)?.user ?? null : null),
+    () =>
+      selectedChat?.type === "direct"
+        ? selectedChat.peer ?? selectedChat.members?.find((member) => member.user.id !== me.id)?.user ?? null
+        : null,
     [me.id, selectedChat],
   );
-  const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
+  const myMember = selectedChat?.members?.find((member) => member.user.id === me.id) ?? null;
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
   const canModerateAllMessages = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
@@ -1950,16 +1993,17 @@ function ChatsPanel({
 
   React.useEffect(() => {
     if (!selectedChatId) {
-        setMessages([]);
-        setDecodeMap({});
-        setMessagesLoading(false);
-        setLoadingOlderMessages(false);
-        setMessagesHasMore(false);
-        setIsMessageListAtBottom(true);
-        setMessagesCursor({ id: null, createdAt: null });
-        return;
-      }
+      setMessages([]);
+      setDecodeMap({});
+      setMessagesLoading(false);
+      setLoadingOlderMessages(false);
+      setMessagesHasMore(false);
+      setIsMessageListAtBottom(true);
+      setMessagesCursor({ id: null, createdAt: null });
+      return;
+    }
     setIsMessageListAtBottom(true);
+    void loadChatDetails(selectedChatId);
     void loadChatMessages(selectedChatId);
   }, [selectedChatId, token]);
 
@@ -1987,11 +2031,31 @@ function ChatsPanel({
             chatMessagesCacheRef.current[incoming.chat_id] = next;
             return next;
           });
-          setChats((previous) => previous.map((chat) => (chat.id === incoming.chat_id ? { ...chat, unread_count: 0 } : chat)));
+          setChats((previous) =>
+            previous.map((chat) =>
+              chat.id === incoming.chat_id
+                ? {
+                    ...chat,
+                    unread_count: 0,
+                    updated_at: incoming.created_at,
+                    last_message_at: incoming.created_at,
+                    last_message_id: incoming.id,
+                  }
+                : chat,
+            ),
+          );
         } else if (incoming.sender.id !== me.id) {
           setChats((previous) =>
             previous.map((chat) =>
-              chat.id === incoming.chat_id ? { ...chat, unread_count: (chat.unread_count ?? 0) + 1, updated_at: incoming.created_at } : chat,
+              chat.id === incoming.chat_id
+                ? {
+                    ...chat,
+                    unread_count: (chat.unread_count ?? 0) + 1,
+                    updated_at: incoming.created_at,
+                    last_message_at: incoming.created_at,
+                    last_message_id: incoming.id,
+                  }
+                : chat,
             ),
           );
         }
@@ -2123,7 +2187,7 @@ function ChatsPanel({
     setChatsLoading(true);
     try {
       const response = await listChats(token);
-      setChats(response.chats);
+      setChats((previous) => mergeChatSummaries(previous, response.chats));
       const hotChat = [...response.chats].sort(
         (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
       )[0];
@@ -2135,9 +2199,26 @@ function ChatsPanel({
     }
   }
 
+  async function loadChatDetails(chatId: string) {
+    const currentChat = chats.find((chat) => chat.id === chatId);
+    if (currentChat?.members && currentChat.members.length > 0) {
+      return;
+    }
+    try {
+      const detailedChat = await readChat(token, chatId);
+      setChats((previous) => previous.map((chat) => (chat.id === chatId ? { ...chat, ...detailedChat } : chat)));
+    } catch {
+      // keep summary chat usable even if detail fetch fails
+    }
+  }
+
   function bumpChatActivity(chatId: string, updatedAt: string) {
     setChats((previous) =>
-      previous.map((chat) => (chat.id === chatId ? { ...chat, updated_at: updatedAt } : chat)),
+      previous.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, updated_at: updatedAt, last_message_at: updatedAt }
+          : chat,
+      ),
     );
   }
 
@@ -2744,7 +2825,7 @@ function ChatsPanel({
     const cachedMessages = chatMessagesCacheRef.current[chat.id] ?? [];
     const lastMessage = cachedMessages.length > 0 ? cachedMessages[cachedMessages.length - 1] : null;
     const previewText = getChatListPreview(chat, lastMessage, decodedMessagesCacheRef.current[chat.id]);
-    const chatTime = formatChatListTime(lastMessage?.created_at ?? chat.updated_at);
+    const chatTime = formatChatListTime(lastMessage?.created_at ?? chat.last_message_at ?? chat.updated_at);
     return (
       <div className={`chat-row ${selectedChatId === chat.id ? "active" : ""}`} key={chat.id}>
         <button
@@ -3047,11 +3128,11 @@ function ChatsPanel({
                 </div>
                 <div className="chat-pane-meta">
                   <h2>{selectedChatMeta?.title}</h2>
-                  <span>{selectedChat.members.length} участников</span>
+                  <span>{getChatMemberCount(selectedChat)} участников</span>
                 </div>
               </div>
               <div className="result-list">
-                {selectedChat.members.map((member) => (
+                {(selectedChat.members ?? []).map((member) => (
                   <div className="result-row" key={member.user.id}>
                     <button className="username-link result-username-link" onClick={() => onOpenProfile(member.user)} type="button">
                       {member.user.username} · {humanizeStatus(member.user.status)}
@@ -3138,7 +3219,7 @@ function ChatsPanel({
                     <button type="submit">Добавить</button>
                   </form>
                 ) : null}
-                {selectedChat.members.map((member) => (
+                {(selectedChat.members ?? []).map((member) => (
                   <div className="result-row" key={member.user.id}>
                     <button className="username-link result-username-link" onClick={() => onOpenProfile(member.user)} type="button">
                       {member.user.username} ({member.role})
@@ -3452,7 +3533,7 @@ function getChatPresentation(chat: Chat, me: CurrentUser): {
   initials: string;
 } {
   if (chat.type === "direct") {
-    const peer = chat.members.find((member) => member.user.id !== me.id)?.user ?? null;
+    const peer = chat.peer ?? chat.members?.find((member) => member.user.id !== me.id)?.user ?? null;
     const title = peer?.username ?? "Личный чат";
     return {
       title,
@@ -3464,10 +3545,32 @@ function getChatPresentation(chat: Chat, me: CurrentUser): {
   const title = chat.title?.trim() || "Группа";
   return {
     title,
-    subtitle: `${chat.members.length} участника`,
+    subtitle: `${getChatMemberCount(chat)} участника`,
     avatarUrl: chat.avatar_url,
     initials: title.slice(0, 1).toUpperCase(),
   };
+}
+
+function getChatMemberCount(chat: Chat): number {
+  if (typeof chat.member_count === "number" && chat.member_count > 0) {
+    return chat.member_count;
+  }
+  return chat.members?.length ?? (chat.type === "direct" ? 2 : 0);
+}
+
+function mergeChatSummaries(previous: Chat[], incoming: Chat[]): Chat[] {
+  const previousById = new Map(previous.map((chat) => [chat.id, chat]));
+  return incoming.map((chat) => {
+    const existing = previousById.get(chat.id);
+    if (!existing) {
+      return chat;
+    }
+    return {
+      ...chat,
+      members: existing.members ?? chat.members,
+      peer: chat.peer ?? existing.peer ?? null,
+    };
+  });
 }
 
 function toStoredPublicUser(user: UserPublic | CurrentUser): UserPublic {
@@ -3655,7 +3758,7 @@ function getChatListPreview(
   decodedMap: Record<string, string> | undefined,
 ): string {
   if (!lastMessage) {
-    return chat.type === "group" ? `${chat.members.length} участника` : "Личный чат";
+    return chat.type === "group" ? `${getChatMemberCount(chat)} участника` : "Личный чат";
   }
   if (lastMessage.message_type === "media") {
     return "Вложение";

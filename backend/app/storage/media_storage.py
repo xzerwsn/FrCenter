@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from fastapi import UploadFile
+
+from app.core.config import settings
+
+
+class MediaStorageError(Exception):
+    pass
+
+
+class UnsupportedMediaStorage(MediaStorageError):
+    pass
+
+
+class MissingMediaObject(MediaStorageError):
+    pass
+
+
+class FilesystemMediaStorage:
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    async def store_upload(self, media_id: str, upload: UploadFile, *, max_size_bytes: int) -> tuple[str, int]:
+        storage_key = self._build_storage_key(media_id)
+        target_path = self.planned_path(storage_key)
+        temp_path = target_path.with_suffix(".tmp")
+        await asyncio.to_thread(target_path.parent.mkdir, parents=True, exist_ok=True)
+
+        size = 0
+        try:
+            with temp_path.open("wb") as handle:
+                while True:
+                    chunk = await upload.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_size_bytes:
+                        raise MediaStorageError("File is too large (max 25 MB)")
+                    handle.write(chunk)
+        except Exception:
+            await asyncio.to_thread(_safe_unlink, temp_path)
+            raise
+        finally:
+            await upload.close()
+
+        await asyncio.to_thread(temp_path.replace, target_path)
+        return storage_key, size
+
+    def resolve_path(self, storage_key: str) -> Path:
+        return self._resolve_under_root(storage_key, require_exists=True)
+
+    def planned_path(self, storage_key: str) -> Path:
+        return self._resolve_under_root(storage_key, require_exists=False)
+
+    def delete(self, storage_key: str) -> None:
+        path = self._resolve_under_root(storage_key, require_exists=False)
+        _safe_unlink(path)
+
+    def _resolve_under_root(self, storage_key: str, *, require_exists: bool) -> Path:
+        path = (self._root / storage_key).resolve()
+        root = self._root.resolve()
+        if root not in path.parents and path != root:
+            raise MissingMediaObject
+        if require_exists and not path.exists():
+            raise MissingMediaObject
+        return path
+
+    def _build_storage_key(self, media_id: str) -> str:
+        return str(Path("encrypted_media") / media_id[:2] / media_id[2:4] / f"{media_id}.bin")
+
+
+def get_media_storage() -> FilesystemMediaStorage:
+    backend = settings.media_storage_backend.strip().lower()
+    if backend != "filesystem":
+        raise UnsupportedMediaStorage(f"Unsupported media storage backend: {settings.media_storage_backend}")
+    root = Path(settings.media_storage_path).resolve()
+    return FilesystemMediaStorage(root)
+
+
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except TypeError:
+        if path.exists():
+            path.unlink()

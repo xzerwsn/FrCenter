@@ -14,6 +14,7 @@ from app.schemas.chat import (
     ChatMemberRemoveRequest,
     ChatMemberRoleUpdateRequest,
     ChatResponse,
+    ChatSummaryResponse,
     DirectChatCreate,
     GroupChatCreate,
     GroupChatUpdateRequest,
@@ -54,7 +55,7 @@ async def list_chats(
     db: AsyncSession = Depends(get_db),
 ) -> ChatListResponse:
     chats = await list_user_chats(db, current_user)
-    return ChatListResponse(chats=chats)
+    return ChatListResponse(chats=[ChatSummaryResponse.model_validate(chat) for chat in chats])
 
 
 @router.post("/direct", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)

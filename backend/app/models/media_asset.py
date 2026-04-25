@@ -18,5 +18,7 @@ class MediaAsset(Base):
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     mime_type: Mapped[str] = mapped_column(String(255), nullable=False, default="application/octet-stream")
     size: Mapped[int] = mapped_column(Integer, nullable=False)
-    encrypted_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(32), nullable=False, default="filesystem")
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    encrypted_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

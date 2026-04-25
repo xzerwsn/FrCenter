@@ -44,17 +44,20 @@ async def ensure_chat_member(db: AsyncSession, user_id: str, chat_id: str) -> No
 
 async def list_chats(db: AsyncSession, current_user: User) -> list[Chat]:
     result = await db.execute(
-        select(Chat)
+        select(Chat, ChatMember.unread_count)
         .join(ChatMember, ChatMember.chat_id == Chat.id)
         .where(ChatMember.user_id == current_user.id, ChatMember.left_at.is_(None))
-        .options(selectinload(Chat.members).selectinload(ChatMember.user))
-        .order_by(Chat.updated_at.desc())
+        .order_by(Chat.last_message_at.desc().nullslast(), Chat.updated_at.desc())
     )
-    chats = list(result.scalars().unique().all())
-    unread_counts = await _get_unread_counts(db, current_user.id, [chat.id for chat in chats])
+    rows = list(result.all())
+    chats = [chat for chat, _unread_count in rows]
+    unread_counts = {chat.id: unread_count for chat, unread_count in rows}
+    direct_chat_ids = [chat.id for chat in chats if chat.type == "direct"]
+    peer_map = await _get_direct_chat_peers(db, current_user.id, direct_chat_ids)
     for chat in chats:
         setattr(chat, "unread_count", unread_counts.get(chat.id, 0))
-    return [_strip_inactive_members(chat) for chat in chats]
+        setattr(chat, "peer", peer_map.get(chat.id))
+    return chats
 
 
 async def create_direct_chat(db: AsyncSession, current_user: User, username: str) -> Chat:
@@ -68,7 +71,7 @@ async def create_direct_chat(db: AsyncSession, current_user: User, username: str
     if existing:
         return existing
 
-    chat = Chat(type="direct", created_by=current_user.id)
+    chat = Chat(type="direct", created_by=current_user.id, member_count=2)
     db.add(chat)
     await db.flush()
     db.add_all(
@@ -94,12 +97,14 @@ async def create_group_chat(
     if len(users) != len(set(usernames)):
         raise UserNotFound
 
+    member_ids = {current_user.id, *[user.id for user in users]}
     chat = Chat(
         type="group",
         title=title,
         avatar_url=avatar_url,
         background_url=background_url,
         created_by=current_user.id,
+        member_count=len(member_ids),
     )
     db.add(chat)
     await db.flush()
@@ -163,6 +168,9 @@ async def list_messages(
 
 async def mark_chat_read(db: AsyncSession, user_id: str, chat_id: str) -> None:
     await _ensure_member(db, user_id, chat_id)
+    member = await _get_active_member(db, chat_id, user_id)
+    if member is not None:
+        member.unread_count = 0
     await db.execute(
         update(MessageRecipient)
         .where(
@@ -197,6 +205,10 @@ async def send_message(
     members = await _get_active_members(db, chat_id)
     if current_user.id not in {member.user_id for member in members}:
         raise NotChatMember
+    chat = await _get_chat_by_id(db, chat_id)
+    if chat is None:
+        raise ChatNotFound
+    message_created_at = datetime.now(UTC)
 
     message = Message(
         chat_id=chat_id,
@@ -205,9 +217,13 @@ async def send_message(
         nonce=nonce,
         message_type=message_type,
         expires_at=datetime.now(UTC) + timedelta(seconds=settings.message_ttl_seconds),
+        created_at=message_created_at,
     )
     db.add(message)
     await db.flush()
+    chat.last_message_id = message.id
+    chat.last_message_at = message_created_at
+    chat.updated_at = message_created_at
 
     db.add_all(
         MessageRecipient(
@@ -217,6 +233,9 @@ async def send_message(
         )
         for member in members
     )
+    for member in members:
+        if member.user_id != current_user.id:
+            member.unread_count += 1
     await db.commit()
 
     result = await db.execute(select(Message).where(Message.id == message.id).options(joinedload(Message.sender)))
@@ -297,6 +316,7 @@ async def add_group_member(
     existing_member = await _get_active_member(db, chat_id, target.id)
     if existing_member is not None:
         return await get_chat(db, current_user, chat_id)
+    chat.member_count += 1
 
     db.add(
         ChatMember(
@@ -405,6 +425,7 @@ async def remove_group_member(
         raise ForbiddenChatAction
 
     target_member.left_at = datetime.now(UTC)
+    chat.member_count = max(chat.member_count - 1, 0)
     if encrypted_group_key:
         await _set_group_key_for_active_members(db, chat_id, encrypted_group_key)
     await db.commit()
@@ -490,6 +511,21 @@ async def _get_chat_with_members(db: AsyncSession, chat_id: str) -> Chat | None:
     return result.scalar_one_or_none()
 
 
+async def _get_direct_chat_peers(db: AsyncSession, current_user_id: str, chat_ids: list[str]) -> dict[str, User]:
+    if not chat_ids:
+        return {}
+    result = await db.execute(
+        select(ChatMember.chat_id, User)
+        .join(User, User.id == ChatMember.user_id)
+        .where(
+            ChatMember.chat_id.in_(chat_ids),
+            ChatMember.user_id != current_user_id,
+            ChatMember.left_at.is_(None),
+        )
+    )
+    return {chat_id: user for chat_id, user in result.all()}
+
+
 async def _set_group_key_for_active_members(db: AsyncSession, chat_id: str, encrypted_group_key: str) -> None:
     members = await _get_active_members(db, chat_id)
     for member in members:
@@ -499,23 +535,6 @@ async def _set_group_key_for_active_members(db: AsyncSession, chat_id: str, encr
 async def _get_message_in_chat(db: AsyncSession, chat_id: str, message_id: str) -> Message | None:
     result = await db.execute(select(Message).where(Message.id == message_id, Message.chat_id == chat_id))
     return result.scalar_one_or_none()
-
-
-async def _get_unread_counts(db: AsyncSession, user_id: str, chat_ids: list[str]) -> dict[str, int]:
-    if not chat_ids:
-        return {}
-    result = await db.execute(
-        select(Message.chat_id, func.count(MessageRecipient.id))
-        .join(MessageRecipient, MessageRecipient.message_id == Message.id)
-        .where(
-            Message.chat_id.in_(chat_ids),
-            MessageRecipient.recipient_user_id == user_id,
-            MessageRecipient.read_at.is_(None),
-            Message.sender_id != user_id,
-        )
-        .group_by(Message.chat_id)
-    )
-    return {chat_id: unread_count for chat_id, unread_count in result.all()}
 
 
 def _can_manage_message(actor_role: str, message_sender_id: str, actor_user_id: str) -> bool:

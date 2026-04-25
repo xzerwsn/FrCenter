@@ -56,9 +56,30 @@ class ChatResponse(BaseModel):
     background_url: str | None
     created_by: str
     created_at: datetime
+    last_message_id: str | None = None
+    last_message_at: datetime | None = None
+    member_count: int = 0
     updated_at: datetime
     unread_count: int = 0
     members: list[ChatMemberResponse]
+
+
+class ChatSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    type: str
+    title: str | None
+    avatar_url: str | None
+    background_url: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    last_message_id: str | None = None
+    last_message_at: datetime | None = None
+    member_count: int = 0
+    unread_count: int = 0
+    peer: UserPublicResponse | None = None
 
 
 class MessageSendRequest(BaseModel):
@@ -95,4 +116,4 @@ class MessageListResponse(BaseModel):
 
 
 class ChatListResponse(BaseModel):
-    chats: list[ChatResponse]
+    chats: list[ChatSummaryResponse]

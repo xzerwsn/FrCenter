@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, literal, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notification import Notification
@@ -129,29 +130,29 @@ async def create_deploy_notifications(
     body: str,
     deployment_key: str,
 ) -> int:
-    result = await db.execute(select(User.id))
-    user_ids = list(result.scalars().all())
-    created = 0
-    for user_id in user_ids:
-        existing = await db.execute(
-            select(Notification.id).where(
-                Notification.user_id == user_id,
-                Notification.kind == "deploy",
-                Notification.dedupe_key == deployment_key,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
-            continue
-        notification = await create_notification(
-            db,
-            user_id=user_id,
-            kind="deploy",
-            title=title,
-            body=body,
-            data={"deployment_key": deployment_key},
-            dedupe_key=deployment_key,
-        )
-        if notification is not None:
-            created += 1
+    payload = {
+        "kind": "deploy",
+        "title": title,
+        "body": body,
+        "dedupe_key": deployment_key,
+        "data_json": json.dumps({"deployment_key": deployment_key}, ensure_ascii=False),
+        "is_read": False,
+    }
+    insert_stmt = pg_insert(Notification).from_select(
+        ["user_id", "kind", "title", "body", "dedupe_key", "data_json", "is_read"],
+        select(
+            User.id,
+            literal(payload["kind"]),
+            literal(payload["title"]),
+            literal(payload["body"]),
+            literal(payload["dedupe_key"]),
+            literal(payload["data_json"]),
+            literal(payload["is_read"]),
+        ),
+    )
+    insert_stmt = insert_stmt.on_conflict_do_nothing(
+        index_elements=["user_id", "kind", "dedupe_key"],
+    )
+    result = await db.execute(insert_stmt)
     await db.commit()
-    return created
+    return int(result.rowcount or 0)

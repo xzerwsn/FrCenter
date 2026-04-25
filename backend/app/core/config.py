@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     smtp_use_ssl: bool = True
 
     media_storage_path: str = "./backend/app/storage"
+    media_storage_backend: str = "filesystem"
     message_ttl_seconds: int = 7200
 
     frontend_url: str = "http://localhost:5173"

@@ -67,3 +67,10 @@ export async function decryptCacheEntriesInWorker(
 export async function generateSharedKeyInWorker(): Promise<string> {
   return callWorker("generate-shared-key");
 }
+
+export async function resetCryptoWorkerSession(): Promise<void> {
+  if (!worker) {
+    return;
+  }
+  await callWorker("clear-session");
+}

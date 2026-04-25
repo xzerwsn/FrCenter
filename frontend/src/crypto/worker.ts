@@ -32,6 +32,10 @@ type WorkerRequest =
   | {
       id: number;
       type: "generate-shared-key";
+    }
+  | {
+      id: number;
+      type: "clear-session";
     };
 
 type WorkerResponse =
@@ -40,6 +44,7 @@ type WorkerResponse =
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const derivedKeyCache = new Map<string, Promise<CryptoKey>>();
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
@@ -63,7 +68,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         return;
       }
       case "encrypt-cache": {
-        const key = await deriveAesKey(request.payload.passphrase, request.payload.salt);
+        const key = await getDerivedAesKey(request.payload.passphrase, request.payload.salt);
         const result = await Promise.all(
           request.payload.items.map(async (item) => {
             const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -83,7 +88,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         return;
       }
       case "decrypt-cache": {
-        const key = await deriveAesKey(request.payload.passphrase, request.payload.salt);
+        const key = await getDerivedAesKey(request.payload.passphrase, request.payload.salt);
         const result = await Promise.all(
           request.payload.items.map(async (item) => {
             try {
@@ -116,6 +121,11 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         respond({ id: request.id, ok: true, result });
         return;
       }
+      case "clear-session": {
+        derivedKeyCache.clear();
+        respond({ id: request.id, ok: true, result: true });
+        return;
+      }
       default: {
         const unknownRequest = request as { id: number };
         respond({ id: unknownRequest.id, ok: false, error: "Unknown worker request" });
@@ -129,6 +139,17 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     });
   }
 };
+
+function getDerivedAesKey(passphrase: string, salt: string): Promise<CryptoKey> {
+  const cacheKey = `${salt}::${passphrase}`;
+  const existing = derivedKeyCache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+  const next = deriveAesKey(passphrase, salt);
+  derivedKeyCache.set(cacheKey, next);
+  return next;
+}
 
 async function deriveAesKey(passphrase: string, salt: string): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey(

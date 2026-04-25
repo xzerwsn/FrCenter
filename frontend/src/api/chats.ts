@@ -15,9 +15,13 @@ export type Chat = {
   background_url: string | null;
   created_by: string;
   created_at: string;
+  last_message_id?: string | null;
+  last_message_at?: string | null;
+  member_count: number;
   updated_at: string;
   unread_count: number;
-  members: ChatMember[];
+  peer?: UserPublic | null;
+  members?: ChatMember[];
 };
 
 export type Message = {
@@ -74,6 +78,10 @@ export async function listChats(token: string): Promise<ChatListResponse> {
 
 export async function createDirectChat(token: string, username: string): Promise<Chat> {
   return apiPost<Chat>("/api/chats/direct", { username }, { token });
+}
+
+export async function readChat(token: string, chatId: string): Promise<Chat> {
+  return apiGet<Chat>(`/api/chats/${chatId}`, { token });
 }
 
 export async function createGroupChat(token: string, payload: CreateGroupChatPayload): Promise<Chat> {

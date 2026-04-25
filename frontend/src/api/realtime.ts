@@ -37,85 +37,154 @@ type RealtimeEnvelope =
       payload: string;
     };
 
-export function connectRealtime(token: string | undefined, onEvent: (event: RealtimeEvent) => void): { close: () => void } {
-  const wsUrl = buildWebSocketUrl();
-  let closedByClient = false;
-  let reconnectTimer: number | undefined;
-  let heartbeatTimer: number | undefined;
-  let socket: WebSocket | null = null;
+type RealtimeSubscriber = (event: RealtimeEvent) => void;
 
-  const clearHeartbeat = () => {
-    if (heartbeatTimer !== undefined) {
-      window.clearInterval(heartbeatTimer);
-      heartbeatTimer = undefined;
-    }
-  };
+type SharedRealtimeState = {
+  socket: WebSocket | null;
+  token: string | undefined;
+  subscribers: Map<number, RealtimeSubscriber>;
+  reconnectTimer: number | undefined;
+  heartbeatTimer: number | undefined;
+  reconnectAttempt: number;
+  nextSubscriberId: number;
+  closeRequested: boolean;
+};
 
-  const connect = () => {
-    const wsEndpoint = token ? `${wsUrl}/ws?token=${encodeURIComponent(token)}` : `${wsUrl}/ws`;
-    socket = new WebSocket(wsEndpoint);
+const sharedState: SharedRealtimeState = {
+  socket: null,
+  token: undefined,
+  subscribers: new Map(),
+  reconnectTimer: undefined,
+  heartbeatTimer: undefined,
+  reconnectAttempt: 0,
+  nextSubscriberId: 0,
+  closeRequested: false,
+};
 
-    socket.onopen = () => {
-      clearHeartbeat();
-      heartbeatTimer = window.setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: "ping" }));
-        }
-      }, 15000);
-    };
+export function connectRealtime(token: string | undefined, onEvent: RealtimeSubscriber): { close: () => void } {
+  const subscriberId = ++sharedState.nextSubscriberId;
+  sharedState.subscribers.set(subscriberId, onEvent);
 
-    socket.onmessage = async (event) => {
-      try {
-        const payload = JSON.parse(event.data) as RealtimeEnvelope;
-        if (payload.type === "batch" && Array.isArray(payload.events)) {
-          for (const nextEvent of payload.events as RealtimeEvent[]) {
-            if (nextEvent.type !== "pong") {
-              onEvent(nextEvent);
-            }
-          }
-          return;
-        }
-        if (payload.type === "batch.compressed" && payload.encoding === "gzip+base64" && typeof payload.payload === "string") {
-          const events = await decompressEvents(payload.payload);
-          for (const nextEvent of events) {
-            if (nextEvent.type !== "pong") {
-              onEvent(nextEvent);
-            }
-          }
-          return;
-        }
-        if (payload.type !== "pong") {
-          onEvent(payload);
-        }
-      } catch {
-        // Ignore malformed payloads in this prototype stage.
-      }
-    };
-
-    socket.onclose = () => {
-      clearHeartbeat();
-      if (!closedByClient) {
-        reconnectTimer = window.setTimeout(connect, 700);
-      }
-    };
-
-    socket.onerror = () => {
-      socket?.close();
-    };
-  };
-
-  connect();
+  if (sharedState.token !== token) {
+    sharedState.token = token;
+    hardResetSocket();
+  }
+  sharedState.closeRequested = false;
+  ensureConnected();
 
   return {
     close: () => {
-      closedByClient = true;
-      clearHeartbeat();
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
+      sharedState.subscribers.delete(subscriberId);
+      if (sharedState.subscribers.size === 0) {
+        sharedState.closeRequested = true;
+        clearReconnectTimer();
+        clearHeartbeat();
+        sharedState.reconnectAttempt = 0;
+        sharedState.socket?.close();
+        sharedState.socket = null;
       }
-      socket?.close();
     },
   };
+}
+
+function ensureConnected(): void {
+  if (sharedState.socket || sharedState.subscribers.size === 0) {
+    return;
+  }
+
+  const wsUrl = buildWebSocketUrl();
+  const wsEndpoint = sharedState.token ? `${wsUrl}/ws?token=${encodeURIComponent(sharedState.token)}` : `${wsUrl}/ws`;
+  const socket = new WebSocket(wsEndpoint);
+  sharedState.socket = socket;
+
+  socket.onopen = () => {
+    sharedState.reconnectAttempt = 0;
+    clearHeartbeat();
+    sharedState.heartbeatTimer = window.setInterval(() => {
+      if (sharedState.socket?.readyState === WebSocket.OPEN) {
+        sharedState.socket.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 15000);
+  };
+
+  socket.onmessage = async (event) => {
+    try {
+      const payload = JSON.parse(event.data) as RealtimeEnvelope;
+      if (payload.type === "batch" && Array.isArray(payload.events)) {
+        publishEvents(payload.events);
+        return;
+      }
+      if (payload.type === "batch.compressed" && payload.encoding === "gzip+base64" && typeof payload.payload === "string") {
+        const events = await decompressEvents(payload.payload);
+        publishEvents(events);
+        return;
+      }
+      publishEvents([payload]);
+    } catch {
+      // Ignore malformed payloads in this prototype stage.
+    }
+  };
+
+  socket.onclose = () => {
+    clearHeartbeat();
+    sharedState.socket = null;
+    if (sharedState.closeRequested || sharedState.subscribers.size === 0) {
+      return;
+    }
+    scheduleReconnect();
+  };
+
+  socket.onerror = () => {
+    socket.close();
+  };
+}
+
+function publishEvents(events: RealtimeEvent[]): void {
+  for (const nextEvent of events) {
+    if (nextEvent.type === "pong") {
+      continue;
+    }
+    for (const subscriber of sharedState.subscribers.values()) {
+      subscriber(nextEvent);
+    }
+  }
+}
+
+function scheduleReconnect(): void {
+  clearReconnectTimer();
+  const attempt = sharedState.reconnectAttempt + 1;
+  sharedState.reconnectAttempt = attempt;
+  const baseDelay = Math.min(1000 * 2 ** Math.min(attempt - 1, 5), 15000);
+  const jitter = Math.floor(Math.random() * 350);
+  sharedState.reconnectTimer = window.setTimeout(() => {
+    sharedState.reconnectTimer = undefined;
+    ensureConnected();
+  }, baseDelay + jitter);
+}
+
+function hardResetSocket(): void {
+  clearReconnectTimer();
+  clearHeartbeat();
+  sharedState.reconnectAttempt = 0;
+  if (sharedState.socket) {
+    const socket = sharedState.socket;
+    sharedState.socket = null;
+    socket.close();
+  }
+}
+
+function clearReconnectTimer(): void {
+  if (sharedState.reconnectTimer !== undefined) {
+    window.clearTimeout(sharedState.reconnectTimer);
+    sharedState.reconnectTimer = undefined;
+  }
+}
+
+function clearHeartbeat(): void {
+  if (sharedState.heartbeatTimer !== undefined) {
+    window.clearInterval(sharedState.heartbeatTimer);
+    sharedState.heartbeatTimer = undefined;
+  }
 }
 
 function buildWebSocketUrl(): string {

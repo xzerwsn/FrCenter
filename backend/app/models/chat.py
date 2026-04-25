@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -23,6 +23,9 @@ class Chat(Base):
     background_url: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_message_id: Mapped[str | None] = mapped_column(String(36))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    member_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -37,13 +40,18 @@ class Chat(Base):
 
 class ChatMember(Base):
     __tablename__ = "chat_members"
-    __table_args__ = (UniqueConstraint("chat_id", "user_id", name="uq_chat_members_chat_user"),)
+    __table_args__ = (
+        UniqueConstraint("chat_id", "user_id", name="uq_chat_members_chat_user"),
+        Index("ix_chat_members_user_left_chat", "user_id", "left_at", "chat_id"),
+        Index("ix_chat_members_chat_left_user", "chat_id", "left_at", "user_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     chat_id: Mapped[str] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(16), default="member", nullable=False)
     encrypted_group_key: Mapped[str | None] = mapped_column(Text)
+    unread_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -69,7 +77,10 @@ class Message(Base):
 
 class MessageRecipient(Base):
     __tablename__ = "message_recipients"
-    __table_args__ = (UniqueConstraint("message_id", "recipient_user_id", name="uq_message_recipients_pair"),)
+    __table_args__ = (
+        UniqueConstraint("message_id", "recipient_user_id", name="uq_message_recipients_pair"),
+        Index("ix_message_recipients_user_read_message", "recipient_user_id", "read_at", "message_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)

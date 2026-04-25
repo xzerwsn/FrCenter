@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.db.session import get_db
 from app.models.media_asset import MediaAsset
 from app.models.user import User
 from app.services.chat_service import NotChatMember, ensure_chat_member
+from app.storage.media_storage import MissingMediaObject, get_media_storage
 
 router = APIRouter()
 
@@ -37,22 +39,35 @@ async def upload_media(
     except NotChatMember as exc:
         raise HTTPException(status_code=403, detail="No access to this chat") from exc
 
-    payload = await encrypted_file.read()
-    if not payload:
+    storage = get_media_storage()
+    media_id = str(uuid4())
+    try:
+        storage_key, size = await storage.store_upload(media_id, encrypted_file, max_size_bytes=25 * 1024 * 1024)
+    except Exception as exc:
+        detail = exc.args[0] if exc.args else "Failed to store encrypted media"
+        status_code = 413 if "too large" in detail.lower() else 500
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    if size == 0:
+        storage.delete(storage_key)
         raise HTTPException(status_code=400, detail="Encrypted file is empty")
-    if len(payload) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File is too large (max 25 MB)")
 
     media = MediaAsset(
+        id=media_id,
         chat_id=chat_id,
         uploader_id=current_user.id,
         filename=encrypted_file.filename or "encrypted.bin",
         mime_type=encrypted_file.content_type or "application/octet-stream",
-        size=len(payload),
-        encrypted_bytes=payload,
+        size=size,
+        storage_backend=settings.media_storage_backend,
+        storage_key=storage_key,
+        encrypted_bytes=None,
     )
     db.add(media)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        storage.delete(storage_key)
+        raise
     await db.refresh(media)
 
     return MediaUploadResponse(
@@ -93,13 +108,26 @@ async def download_media(
             },
         )
 
-    return Response(
-        content=media.encrypted_bytes,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f'inline; filename="{media.filename}"',
-            "Cache-Control": "private, max-age=604800, stale-while-revalidate=86400",
-            "ETag": etag,
-            "Expires": expires_at,
-        },
-    )
+    headers = {
+        "Content-Disposition": f'inline; filename="{media.filename}"',
+        "Cache-Control": "private, max-age=604800, stale-while-revalidate=86400",
+        "ETag": etag,
+        "Expires": expires_at,
+    }
+    if media.storage_key:
+        storage = get_media_storage()
+        try:
+            file_path = storage.resolve_path(media.storage_key)
+        except MissingMediaObject as exc:
+            raise HTTPException(status_code=404, detail="Media object missing") from exc
+        return FileResponse(
+            file_path,
+            media_type="application/octet-stream",
+            filename=media.filename,
+            headers=headers,
+        )
+
+    if media.encrypted_bytes is None:
+        raise HTTPException(status_code=404, detail="Media object missing")
+
+    return Response(content=media.encrypted_bytes, media_type="application/octet-stream", headers=headers)
