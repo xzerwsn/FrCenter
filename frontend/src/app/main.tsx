@@ -17,10 +17,8 @@ import {
   Pin,
   PinOff,
   PlaySquare,
-  Search,
   Settings,
   UserRound,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -51,8 +49,6 @@ import {
   declineFriendRequest,
   listFriendRequests,
   listFriends,
-  searchUsers,
-  sendFriendRequest,
   type FriendRequestResponse,
 } from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
@@ -94,6 +90,7 @@ type SiteTheme = {
   text: string;
   accent: string;
   secondaryAccent: string;
+  swatches: string[];
 };
 
 const SITE_THEMES: SiteTheme[] = [
@@ -105,6 +102,7 @@ const SITE_THEMES: SiteTheme[] = [
     text: "#F3F7FB",
     accent: "#4C8DFF",
     secondaryAccent: "#8EC5FF",
+    swatches: ["#0F1722", "#1A2431", "#F3F7FB", "#4C8DFF", "#8EC5FF"],
   },
   {
     id: "classic-light",
@@ -114,6 +112,37 @@ const SITE_THEMES: SiteTheme[] = [
     text: "#18212B",
     accent: "#3E79F7",
     secondaryAccent: "#87B4FF",
+    swatches: ["#F4F7FB", "#FFFFFF", "#18212B", "#3E79F7", "#87B4FF"],
+  },
+  {
+    id: "ashes",
+    name: "Пепел",
+    background: "#0A0A0A",
+    surface: "#33312F",
+    text: "#B7B4AE",
+    accent: "#726E68",
+    secondaryAccent: "#371E1E",
+    swatches: ["#B7B4AE", "#726E68", "#33312F", "#371E1E", "#0A0A0A"],
+  },
+  {
+    id: "northern-lights",
+    name: "Северное сияние",
+    background: "#1F0922",
+    surface: "#4B2B55",
+    text: "#CAD5D4",
+    accent: "#89B199",
+    secondaryAccent: "#6F7074",
+    swatches: ["#1F0922", "#4B2B55", "#6F7074", "#89B199", "#CAD5D4"],
+  },
+  {
+    id: "dawn",
+    name: "Рассвет",
+    background: "#CA2851",
+    surface: "#FF6766",
+    text: "#FFE3B3",
+    accent: "#FFB173",
+    secondaryAccent: "#FFE3B3",
+    swatches: ["#CA2851", "#FF6766", "#FFB173", "#FFE3B3"],
   },
 ];
 
@@ -594,8 +623,13 @@ function Dashboard({
     setSection("profile");
   }
 
-  function openFriendProfile(friend: UserPublic) {
-    setSelectedProfile(friend);
+  function openUserProfile(user: UserPublic | CurrentUser) {
+    if (user.id === session.user.id) {
+      setSelectedProfile(null);
+      setSection("profile");
+      return;
+    }
+    setSelectedProfile(toStoredPublicUser(user));
     setSection("profile");
   }
 
@@ -709,6 +743,7 @@ function Dashboard({
         {mountedSections.includes("profile") ? (
         <div style={{ display: section === "profile" ? "block" : "none" }}>
           <ProfilePanel
+            onOpenProfile={openUserProfile}
             onLogout={onLogout}
             token={session.token}
             profile={selectedProfile && selectedProfile.id !== session.user.id ? selectedProfile : session.user}
@@ -719,27 +754,27 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("home") ? (
         <div style={{ display: section === "home" ? "block" : "none" }}>
-          <HomePanel token={session.token} />
+          <HomePanel onOpenProfile={openUserProfile} token={session.token} />
         </div>
         ) : null}
         {mountedSections.includes("chats") ? (
         <div style={{ display: section === "chats" ? "block" : "none" }}>
-          <ChatsPanel token={session.token} me={session.user} friends={friends} />
+          <ChatsPanel friends={friends} me={session.user} onOpenProfile={openUserProfile} token={session.token} />
         </div>
         ) : null}
         {mountedSections.includes("friends") ? (
         <div style={{ display: section === "friends" ? "block" : "none" }}>
-          <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openFriendProfile} />
+          <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openUserProfile} />
         </div>
         ) : null}
         {mountedSections.includes("games") ? (
         <div style={{ display: section === "games" ? "block" : "none" }}>
-          <GamesPanel friends={friends} />
+          <GamesPanel friends={friends} onOpenProfile={openUserProfile} />
         </div>
         ) : null}
         {mountedSections.includes("clips") ? (
         <div style={{ display: section === "clips" ? "block" : "none" }}>
-          <ClipsPanel friends={friends} />
+          <ClipsPanel friends={friends} onOpenProfile={openUserProfile} />
         </div>
         ) : null}
         {mountedSections.includes("settings") ? (
@@ -761,11 +796,11 @@ function Dashboard({
           {unreadNotifications > 0 ? <span className="friends-notifications-badge">{unreadNotifications}</span> : null}
         </button>
         {friends.map((friend) => (
-          <button className="friend" key={friend.id} onClick={() => openFriendProfile(friend)} type="button">
+          <button className="friend" key={friend.id} onClick={() => openUserProfile(friend)} type="button">
             <div>
               {friend.avatar_url ? <img alt={friend.username} src={friend.avatar_url} /> : friend.username.slice(0, 1).toUpperCase()}
             </div>
-            <span>{friend.username}</span>
+            <span className="username-link-label">{friend.username}</span>
           </button>
         ))}
       </aside>
@@ -786,7 +821,12 @@ function Dashboard({
                     <strong>Заявка в друзья</strong>
                     <time>{formatChatListTime(request.created_at)}</time>
                   </div>
-                  <p>@{request.from_user.username} хочет добавить вас в друзья.</p>
+                  <p>
+                    <button className="username-link inline-username-link" onClick={() => openUserProfile(request.from_user)} type="button">
+                      @{request.from_user.username}
+                    </button>{" "}
+                    хочет добавить вас в друзья.
+                  </p>
                   <div className="notification-card-actions">
                     <button onClick={() => void handleAcceptFriendRequest(request.id)} type="button">
                       Принять
@@ -828,12 +868,14 @@ function Dashboard({
 }
 
 function ProfilePanel({
+  onOpenProfile,
   onLogout,
   token,
   profile,
   sessionUser,
   onSessionUserUpdate,
 }: {
+  onOpenProfile: (user: UserPublic | CurrentUser) => void;
   onLogout: () => void;
   token: string;
   profile: UserPublic | CurrentUser;
@@ -1069,7 +1111,9 @@ function ProfilePanel({
                 <div className="profile-main-meta">
                   <strong>{cardName}</strong>
                   <div className="profile-main-badges">
-                    <span className="profile-main-tag">@{cardUsername}</span>
+                    <button className="username-link profile-main-tag profile-main-tag-button" onClick={() => onOpenProfile(profile)} type="button">
+                      @{cardUsername}
+                    </button>
                     <span className={`status-pill status-${normalizeStatus(status)}`}>{cardStatus}</span>
                   </div>
                 </div>
@@ -1286,7 +1330,7 @@ function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): Profil
   }
 }
 
-function HomePanel({ token }: { token: string }) {
+function HomePanel({ token, onOpenProfile }: { token: string; onOpenProfile: (user: UserPublic) => void }) {
   const [items, setItems] = React.useState<FeedPublication[]>([]);
   const [status, setStatus] = React.useState("");
 
@@ -1327,7 +1371,28 @@ function HomePanel({ token }: { token: string }) {
                     <div className="home-feed-avatar">
                       {item.author_avatar_url ? <img alt={item.author_username} decoding="async" loading="lazy" src={item.author_avatar_url} /> : item.author_username.slice(0, 1).toUpperCase()}
                     </div>
-                    <strong>@{item.author_username}</strong>
+                    <button
+                      className="username-link feed-username-link"
+                      onClick={() =>
+                        onOpenProfile({
+                          id: item.author_id,
+                          username: item.author_username,
+                          display_name: item.author_display_name,
+                          nickname: null,
+                          profile_status: null,
+                          profile_banner_url: null,
+                          profile_background_url: null,
+                          profile_photos: null,
+                          avatar_ring_style: null,
+                          avatar_url: item.author_avatar_url,
+                          status: "offline",
+                          current_game: null,
+                        })
+                      }
+                      type="button"
+                    >
+                      @{item.author_username}
+                    </button>
                   </div>
                   <p>{item.caption || "Без подписи"}</p>
                 </div>
@@ -1340,7 +1405,7 @@ function HomePanel({ token }: { token: string }) {
   );
 }
 
-function GamesPanel({ friends }: { friends: UserPublic[] }) {
+function GamesPanel({ friends, onOpenProfile }: { friends: UserPublic[]; onOpenProfile: (user: UserPublic) => void }) {
   return (
     <section className="tool-band">
       <div>
@@ -1349,7 +1414,9 @@ function GamesPanel({ friends }: { friends: UserPublic[] }) {
         <div className="result-list">
           {friends.map((friend) => (
             <div className="result-row" key={friend.id}>
-              <span>{friend.username}</span>
+              <button className="username-link result-username-link" onClick={() => onOpenProfile(friend)} type="button">
+                {friend.username}
+              </button>
               <span>{friend.current_game ?? "Не играет"}</span>
             </div>
           ))}
@@ -1372,7 +1439,7 @@ function GamesPanel({ friends }: { friends: UserPublic[] }) {
   );
 }
 
-function ClipsPanel({ friends }: { friends: UserPublic[] }) {
+function ClipsPanel({ friends, onOpenProfile }: { friends: UserPublic[]; onOpenProfile: (user: UserPublic) => void }) {
   return (
     <section className="tool-band single-column">
       <div>
@@ -1381,7 +1448,9 @@ function ClipsPanel({ friends }: { friends: UserPublic[] }) {
         <div className="result-list">
           {friends.slice(0, 6).map((friend) => (
             <div className="result-row" key={friend.id}>
-              <span>{friend.username}</span>
+              <button className="username-link result-username-link" onClick={() => onOpenProfile(friend)} type="button">
+                {friend.username}
+              </button>
               <span>Публикаций: 0</span>
             </div>
           ))}
@@ -1531,11 +1600,9 @@ function SettingsPanel({
                   type="button"
                 >
                   <div className="theme-card-swatches">
-                    <span style={{ backgroundColor: theme.background }} />
-                    <span style={{ backgroundColor: theme.surface }} />
-                    <span style={{ backgroundColor: theme.text }} />
-                    <span style={{ backgroundColor: theme.accent }} />
-                    <span style={{ backgroundColor: theme.secondaryAccent }} />
+                    {theme.swatches.map((swatch) => (
+                      <span key={`${theme.id}-${swatch}`} style={{ backgroundColor: swatch }} />
+                    ))}
                   </div>
                   <strong>{theme.name}</strong>
                 </button>
@@ -1557,8 +1624,6 @@ function FriendsPanel({
   onFriendsChanged: (friends: UserPublic[]) => void;
   onOpenProfile: (friend: UserPublic) => void;
 }) {
-  const [query, setQuery] = React.useState("");
-  const [searchResults, setSearchResults] = React.useState<UserPublic[]>([]);
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
@@ -1566,10 +1631,6 @@ function FriendsPanel({
   const onlineFriends = React.useMemo(
     () => friends.filter((friend) => normalizeStatus(friend.status) === "online").length,
     [friends],
-  );
-  const pendingResults = React.useMemo(
-    () => searchResults.filter((user) => !friends.some((friend) => friend.id === user.id)),
-    [friends, searchResults],
   );
 
   React.useEffect(() => {
@@ -1581,29 +1642,6 @@ function FriendsPanel({
     const response = await listFriends(token);
     setFriends(response.friends);
     onFriendsChanged(response.friends);
-  }
-
-  async function handleSearch(event: React.FormEvent) {
-    event.preventDefault();
-    setStatus("Ищем...");
-    try {
-      const results = await searchUsers(token, query);
-      setSearchResults(results);
-      setStatus(results.length ? "" : "Никого не нашли");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось найти пользователя");
-    }
-  }
-
-  async function handleRequest(username: string) {
-    setStatus("Отправляем заявку...");
-    try {
-      await sendFriendRequest(token, username);
-      setStatus("Заявка отправлена");
-      await refreshFriends();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось отправить заявку");
-    }
   }
 
   async function loadPersonalInviteCode() {
@@ -1663,14 +1701,6 @@ function FriendsPanel({
           </div>
         </div>
 
-        <form className="inline-form friends-search-form" onSubmit={handleSearch}>
-          <div className="friends-search-input">
-            <Search size={16} />
-            <input placeholder="Найти по username" value={query} onChange={(event) => setQuery(event.target.value)} required />
-          </div>
-          <button type="submit">Найти</button>
-        </form>
-
         <div className="friends-grid">
           {friends.map((friend) => (
             <article className="friend-card" key={friend.id}>
@@ -1679,8 +1709,12 @@ function FriendsPanel({
                   {friend.avatar_url ? <img alt={friend.username} src={friend.avatar_url} /> : friend.username.slice(0, 1).toUpperCase()}
                 </div>
                 <div className="friend-card-meta">
-                  <strong>{friend.display_name || friend.username}</strong>
-                  <span>@{friend.username}</span>
+                  <button className="username-link card-username-link" onClick={() => onOpenProfile(friend)} type="button">
+                    {friend.display_name || friend.username}
+                  </button>
+                  <button className="username-link card-username-link secondary" onClick={() => onOpenProfile(friend)} type="button">
+                    @{friend.username}
+                  </button>
                 </div>
                 <small className={`status-pill status-${normalizeStatus(friend.status)}`}>{humanizeStatus(friend.status)}</small>
               </div>
@@ -1695,32 +1729,6 @@ function FriendsPanel({
       </div>
 
       <div className="friends-side-column">
-        <section className="friends-side-section">
-          <div className="friends-card-head">
-            <div className="friends-card-icon">
-              <UserPlus size={18} />
-            </div>
-            <div>
-              <h3>Добавить друга</h3>
-              <p>Результаты поиска и отправка заявки.</p>
-            </div>
-          </div>
-          <div className="friends-result-list">
-            {pendingResults.map((user) => (
-              <div className="friends-result-row" key={user.id}>
-                <div>
-                  <strong>{user.display_name || user.username}</strong>
-                  <span>@{user.username}</span>
-                </div>
-                <button onClick={() => handleRequest(user.username)} type="button">
-                  Заявка
-                </button>
-              </div>
-            ))}
-            {query && pendingResults.length === 0 ? <p className="form-status">После поиска здесь появятся новые пользователи.</p> : null}
-          </div>
-        </section>
-
         <section className="friends-side-section friends-invite-card">
           <div className="friends-card-head">
             <div className="friends-card-icon">
@@ -1753,10 +1761,12 @@ function ChatsPanel({
   token,
   me,
   friends,
+  onOpenProfile,
 }: {
   token: string;
   me: CurrentUser;
   friends: UserPublic[];
+  onOpenProfile: (user: UserPublic) => void;
 }) {
   const [chats, setChats] = React.useState<Chat[]>(() => readStoredChats(me.id));
   const [selectedChatId, setSelectedChatId] = React.useState<string>(() => readStoredSelectedChatId(me.id));
@@ -1785,13 +1795,14 @@ function ChatsPanel({
   const [status, setStatus] = React.useState("");
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
   const [chatsLoading, setChatsLoading] = React.useState<boolean>(() => readStoredChats(me.id).length === 0);
-  const [messagesLoading, setMessagesLoading] = React.useState(false);
-  const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
-  const [messagesHasMore, setMessagesHasMore] = React.useState(false);
-  const [messagesCursor, setMessagesCursor] = React.useState<{ id: string | null; createdAt: string | null }>({
-    id: null,
-    createdAt: null,
-  });
+    const [messagesLoading, setMessagesLoading] = React.useState(false);
+    const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
+    const [messagesHasMore, setMessagesHasMore] = React.useState(false);
+    const [isMessageListAtBottom, setIsMessageListAtBottom] = React.useState(true);
+    const [messagesCursor, setMessagesCursor] = React.useState<{ id: string | null; createdAt: string | null }>({
+      id: null,
+      createdAt: null,
+    });
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === "undefined") {
       return false;
@@ -1806,14 +1817,15 @@ function ChatsPanel({
   const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const editAvatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const editBackgroundInputRef = React.useRef<HTMLInputElement | null>(null);
-  const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
-  const selectedChatIdRef = React.useRef<string>("");
-  const messageRequestRef = React.useRef(0);
-  const olderMessagesRequestRef = React.useRef(0);
-  const skipNextAutoScrollRef = React.useRef(false);
-  const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
-  const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
-  const chatMessagePageInfoRef = React.useRef<Record<string, { id: string | null; createdAt: string | null; hasMore: boolean }>>({});
+    const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
+    const selectedChatIdRef = React.useRef<string>("");
+    const messageRequestRef = React.useRef(0);
+    const olderMessagesRequestRef = React.useRef(0);
+    const skipNextAutoScrollRef = React.useRef(false);
+    const isMessageListAtBottomRef = React.useRef(true);
+    const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
+    const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
+    const chatMessagePageInfoRef = React.useRef<Record<string, { id: string | null; createdAt: string | null; hasMore: boolean }>>({});
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
   const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
@@ -1832,6 +1844,10 @@ function ChatsPanel({
 
   const selectedChat = orderedChats.find((chat) => chat.id === selectedChatId) ?? null;
   const selectedChatMeta = selectedChat ? getChatPresentation(selectedChat, me) : null;
+  const selectedDirectPeer = React.useMemo(
+    () => (selectedChat?.type === "direct" ? selectedChat.members.find((member) => member.user.id !== me.id)?.user ?? null : null),
+    [me.id, selectedChat],
+  );
   const myMember = selectedChat?.members.find((member) => member.user.id === me.id) ?? null;
   const canManageMembers = selectedChat?.type === "group" && (myMember?.role === "owner" || myMember?.role === "admin");
   const canManageRoles = selectedChat?.type === "group" && myMember?.role === "owner";
@@ -1862,15 +1878,15 @@ function ChatsPanel({
       }
     : undefined;
 
-  const scrollToBottom = React.useCallback(() => {
-    const list = virtuosoRef.current;
-    if (!list || messages.length === 0) {
-      return;
-    }
-    requestAnimationFrame(() => {
-      list.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "auto" });
-    });
-  }, [messages.length]);
+  const scrollToBottom = React.useCallback((behavior: "auto" | "smooth" = "auto") => {
+      const list = virtuosoRef.current;
+      if (!list || messages.length === 0) {
+        return;
+      }
+      requestAnimationFrame(() => {
+        list.scrollToIndex({ index: messages.length - 1, align: "end", behavior });
+      });
+    }, [messages.length]);
 
   React.useEffect(() => {
     void reloadChats();
@@ -1909,6 +1925,10 @@ function ChatsPanel({
   }, [selectedChatId]);
 
   React.useEffect(() => {
+    isMessageListAtBottomRef.current = isMessageListAtBottom;
+  }, [isMessageListAtBottom]);
+
+  React.useEffect(() => {
     if (orderedChats.length === 0) {
       if (selectedChatId) {
         setSelectedChatId("");
@@ -1930,14 +1950,16 @@ function ChatsPanel({
 
   React.useEffect(() => {
     if (!selectedChatId) {
-      setMessages([]);
-      setDecodeMap({});
-      setMessagesLoading(false);
-      setLoadingOlderMessages(false);
-      setMessagesHasMore(false);
-      setMessagesCursor({ id: null, createdAt: null });
-      return;
-    }
+        setMessages([]);
+        setDecodeMap({});
+        setMessagesLoading(false);
+        setLoadingOlderMessages(false);
+        setMessagesHasMore(false);
+        setIsMessageListAtBottom(true);
+        setMessagesCursor({ id: null, createdAt: null });
+        return;
+      }
+    setIsMessageListAtBottom(true);
     void loadChatMessages(selectedChatId);
   }, [selectedChatId, token]);
 
@@ -2072,6 +2094,9 @@ function ChatsPanel({
   React.useEffect(() => {
     if (skipNextAutoScrollRef.current) {
       skipNextAutoScrollRef.current = false;
+      return;
+    }
+    if (!isMessageListAtBottomRef.current) {
       return;
     }
     scrollToBottom();
@@ -2973,7 +2998,17 @@ function ChatsPanel({
               <div className="chat-pane-avatar">
                 {selectedChatMeta.avatarUrl ? <img alt={selectedChatMeta.title} src={selectedChatMeta.avatarUrl} /> : selectedChatMeta.initials}
               </div>
-              <button className="chat-meta-pill" onClick={() => setChatInfoModalOpen(true)} type="button">
+              <button
+                className="chat-meta-pill"
+                onClick={() => {
+                  if (selectedDirectPeer) {
+                    onOpenProfile(selectedDirectPeer);
+                    return;
+                  }
+                  setChatInfoModalOpen(true);
+                }}
+                type="button"
+              >
                 <strong>{selectedChatMeta.title}</strong>
                 <span>{selectedChatMeta.subtitle}</span>
               </button>
@@ -3018,9 +3053,9 @@ function ChatsPanel({
               <div className="result-list">
                 {selectedChat.members.map((member) => (
                   <div className="result-row" key={member.user.id}>
-                    <span>
+                    <button className="username-link result-username-link" onClick={() => onOpenProfile(member.user)} type="button">
                       {member.user.username} · {humanizeStatus(member.user.status)}
-                    </span>
+                    </button>
                     <span>{member.role}</span>
                   </div>
                 ))}
@@ -3105,9 +3140,9 @@ function ChatsPanel({
                 ) : null}
                 {selectedChat.members.map((member) => (
                   <div className="result-row" key={member.user.id}>
-                    <span>
+                    <button className="username-link result-username-link" onClick={() => onOpenProfile(member.user)} type="button">
                       {member.user.username} ({member.role})
-                    </span>
+                    </button>
                     {canManageRoles && member.role !== "owner" ? (
                       <button onClick={() => handleRoleChange(member.user.id, member.role === "admin" ? "member" : "admin")} type="button">
                         {member.role === "admin" ? "Снять admin" : "Сделать admin"}
@@ -3125,11 +3160,12 @@ function ChatsPanel({
           </div>
         ) : null}
 
-          {messagesLoading && messages.length === 0 ? <p className="form-status">Загружаем сообщения...</p> : null}
+          {messagesLoading && messages.length === 0 ? <ChatMessagesSkeleton /> : null}
         {loadingOlderMessages ? <p className="form-status">Подгружаем предыдущие сообщения...</p> : null}
         {selectedChatId && !messagesLoading && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
         {messages.length > 0 ? (
           <VirtualMessageList
+            onAtBottomChange={setIsMessageListAtBottom}
             canManageMessage={canManageMessage}
             chatId={selectedChatId}
             currentUserId={me.id}
@@ -3138,7 +3174,11 @@ function ChatsPanel({
             hasMore={messagesHasMore}
             messages={messages}
             onLoadOlder={() => void loadOlderMessages()}
-            onMediaReady={scrollToBottom}
+            onMediaReady={() => {
+              if (isMessageListAtBottomRef.current) {
+                scrollToBottom();
+              }
+            }}
             onOpenContextMenu={(message, x, y) =>
               setContextMenu({
                 message,
@@ -3146,6 +3186,7 @@ function ChatsPanel({
                 y,
               })
             }
+            onOpenProfile={onOpenProfile}
             onPreviewMedia={(url, mediaType) => {
               setPreviewMediaUrl(url);
               setPreviewMediaType(mediaType);
@@ -3427,6 +3468,48 @@ function getChatPresentation(chat: Chat, me: CurrentUser): {
     avatarUrl: chat.avatar_url,
     initials: title.slice(0, 1).toUpperCase(),
   };
+}
+
+function toStoredPublicUser(user: UserPublic | CurrentUser): UserPublic {
+  if (!("email" in user)) {
+    return user;
+  }
+  return {
+    id: user.id,
+    username: user.username,
+    display_name: user.display_name,
+    nickname: user.nickname,
+    profile_status: user.profile_status,
+    profile_banner_url: user.profile_banner_url,
+    profile_background_url: user.profile_background_url,
+    profile_photos: JSON.stringify(user.profile_photos ?? []),
+    avatar_ring_style: user.avatar_ring_style,
+    avatar_url: user.avatar_url,
+    status: user.status,
+    current_game: user.current_game,
+  };
+}
+
+function ChatMessagesSkeleton() {
+  return (
+    <div className="message-skeleton-list" aria-hidden="true">
+      {Array.from({ length: 7 }, (_value, index) => {
+        const mine = index % 3 === 2;
+        return (
+          <div className={`message-row ${mine ? "mine" : "other"}`} key={`skeleton-${index}`}>
+            <div className={`message message-skeleton ${mine ? "mine" : ""}`}>
+              <div className="message-skeleton-head">
+                <span className="message-skeleton-avatar" />
+                <span className="message-skeleton-line short" />
+              </div>
+              <span className="message-skeleton-line full" />
+              <span className="message-skeleton-line medium" />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function isUnauthorizedError(error: unknown): boolean {

@@ -2,6 +2,7 @@ import React from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import type { Message } from "../api/chats";
+import type { UserPublic } from "../api/users";
 import { decryptBytesWithSharedKey } from "../crypto/messages";
 
 export type MediaPayloadFile = {
@@ -131,6 +132,9 @@ const MessageBubble = React.memo(function MessageBubble({
   message,
   isMine,
   decodedText,
+  showHeader,
+  compactTop,
+  compactBottom,
   canManageMessage,
   onOpenContextMenu,
   onPreviewMedia,
@@ -138,10 +142,14 @@ const MessageBubble = React.memo(function MessageBubble({
   token,
   onMediaReady,
   ensureChatKey,
+  onOpenProfile,
 }: {
   message: Message;
   isMine: boolean;
   decodedText: string;
+  showHeader: boolean;
+  compactTop: boolean;
+  compactBottom: boolean;
   canManageMessage: boolean;
   onOpenContextMenu: (message: Message, x: number, y: number) => void;
   onPreviewMedia: (url: string, mediaType: string) => void;
@@ -149,10 +157,13 @@ const MessageBubble = React.memo(function MessageBubble({
   token: string;
   onMediaReady: () => void;
   ensureChatKey: (chatId: string) => Promise<string>;
+  onOpenProfile: (user: UserPublic) => void;
 }) {
   return (
     <div
-      className={`message message-enter ${isMine ? "mine" : ""}`}
+      className={`message message-enter ${isMine ? "mine" : ""} ${compactTop ? "compact-top" : ""} ${compactBottom ? "compact-bottom" : ""} ${
+        !showHeader ? "grouped" : ""
+      }`}
       onContextMenu={(event) => {
         if (!canManageMessage) {
           return;
@@ -161,19 +172,23 @@ const MessageBubble = React.memo(function MessageBubble({
         onOpenContextMenu(message, event.clientX, event.clientY);
       }}
     >
-      <div className="message-head">
-        <div className="message-author">
-          <div className="message-avatar">
-            {message.sender.avatar_url ? (
-              <img alt={message.sender.username} src={message.sender.avatar_url} />
-            ) : (
-              message.sender.username.slice(0, 1).toUpperCase()
-            )}
+      {showHeader ? (
+        <div className="message-head">
+          <div className="message-author">
+            <div className="message-avatar">
+              {message.sender.avatar_url ? (
+                <img alt={message.sender.username} src={message.sender.avatar_url} />
+              ) : (
+                message.sender.username.slice(0, 1).toUpperCase()
+              )}
+            </div>
+            <button className="username-link message-username" onClick={() => onOpenProfile(message.sender)} type="button">
+              {message.sender.username}
+            </button>
           </div>
-          <b>{message.sender.username}</b>
+          <time>{formatMessageTime(message.created_at)}</time>
         </div>
-        <time>{formatMessageTime(message.created_at)}</time>
-      </div>
+      ) : null}
       {message.message_type === "media" ? (
         <MediaMessageView
           chatId={chatId}
@@ -201,9 +216,11 @@ export const VirtualMessageList = React.memo(function VirtualMessageList({
   onOpenContextMenu,
   onPreviewMedia,
   onMediaReady,
+  onAtBottomChange,
   onLoadOlder,
   hasMore,
   ensureChatKey,
+  onOpenProfile,
 }: {
   virtuosoRef: React.RefObject<VirtuosoHandle | null>;
   chatId: string;
@@ -215,36 +232,53 @@ export const VirtualMessageList = React.memo(function VirtualMessageList({
   onOpenContextMenu: (message: Message, x: number, y: number) => void;
   onPreviewMedia: (url: string, mediaType: string) => void;
   onMediaReady: () => void;
+  onAtBottomChange: (isAtBottom: boolean) => void;
   onLoadOlder: () => void;
   hasMore: boolean;
   ensureChatKey: (chatId: string) => Promise<string>;
+  onOpenProfile: (user: UserPublic) => void;
 }) {
   const itemContent = React.useCallback(
-    (_index: number, message: Message) => (
-      <div style={{ paddingBottom: 10 }}>
+    (index: number, message: Message) => {
+      const previousMessage = index > 0 ? messages[index - 1] : null;
+      const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+      const sameSenderAsPrevious = previousMessage?.sender.id === message.sender.id;
+      const sameSenderAsNext = nextMessage?.sender.id === message.sender.id;
+      return (
+      <div
+        className={`message-row ${message.sender.id === currentUserId ? "mine" : "other"} ${sameSenderAsPrevious ? "grouped" : ""} ${
+          sameSenderAsNext ? "group-continues" : ""
+        }`}
+      >
         <MessageBubble
           canManageMessage={canManageMessage(message)}
           chatId={chatId}
+          compactBottom={sameSenderAsNext}
+          compactTop={sameSenderAsPrevious}
           decodedText={decodeMap[message.id] ?? ""}
           ensureChatKey={ensureChatKey}
           isMine={message.sender.id === currentUserId}
           message={message}
           onMediaReady={onMediaReady}
           onOpenContextMenu={onOpenContextMenu}
+          onOpenProfile={onOpenProfile}
           onPreviewMedia={onPreviewMedia}
+          showHeader={!sameSenderAsPrevious}
           token={token}
         />
       </div>
-    ),
-    [canManageMessage, chatId, currentUserId, decodeMap, ensureChatKey, onMediaReady, onOpenContextMenu, onPreviewMedia, token],
+    );
+    },
+    [canManageMessage, chatId, currentUserId, decodeMap, ensureChatKey, messages, onMediaReady, onOpenContextMenu, onOpenProfile, onPreviewMedia, token],
   );
 
   return (
     <Virtuoso
+      atBottomStateChange={onAtBottomChange}
       className="message-list"
       computeItemKey={(_index, message) => message.id}
       data={messages}
-      followOutput="auto"
+      followOutput={false}
       increaseViewportBy={{ top: 400, bottom: 800 }}
       initialTopMostItemIndex={Math.max(messages.length - 1, 0)}
       itemContent={itemContent}
