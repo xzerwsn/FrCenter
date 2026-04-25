@@ -14,7 +14,8 @@ let sodiumModulePromise: Promise<typeof import("libsodium-wrappers-sumo")> | nul
 
 async function getSodium() {
   sodiumModulePromise ??= import("libsodium-wrappers-sumo");
-  const sodium = await sodiumModulePromise;
+  const sodiumModule = await sodiumModulePromise;
+  const sodium = (("default" in sodiumModule ? sodiumModule.default : sodiumModule) ?? sodiumModule) as typeof import("libsodium-wrappers-sumo");
   await sodium.ready;
   return sodium;
 }

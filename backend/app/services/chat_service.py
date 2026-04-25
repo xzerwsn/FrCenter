@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.core.config import settings
 from app.models.chat import Chat, ChatMember, Message, MessageRecipient
@@ -140,7 +140,7 @@ async def list_messages(
         select(Message)
         .where(Message.chat_id == chat_id)
         .where(Message.expires_at > datetime.now(UTC))
-        .options(selectinload(Message.sender))
+        .options(joinedload(Message.sender))
     )
     if cursor_created_at is not None:
         query = query.where(
@@ -219,7 +219,7 @@ async def send_message(
     )
     await db.commit()
 
-    result = await db.execute(select(Message).where(Message.id == message.id).options(selectinload(Message.sender)))
+    result = await db.execute(select(Message).where(Message.id == message.id).options(joinedload(Message.sender)))
     return result.scalar_one()
 
 
@@ -248,7 +248,7 @@ async def update_message(
     message.message_type = message_type
     await db.commit()
 
-    result = await db.execute(select(Message).where(Message.id == message.id).options(selectinload(Message.sender)))
+    result = await db.execute(select(Message).where(Message.id == message.id).options(joinedload(Message.sender)))
     return result.scalar_one()
 
 

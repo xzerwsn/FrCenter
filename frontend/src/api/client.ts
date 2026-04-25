@@ -4,6 +4,18 @@ type ApiOptions = {
   token?: string;
 };
 
+export class ApiError extends Error {
+  status: number;
+  payload?: unknown;
+
+  constructor(status: number, message: string, payload?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
     credentials: "include",
@@ -57,12 +69,14 @@ function createHeaders(token?: string): HeadersInit {
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let detail = `API request failed: ${response.status}`;
+    let payload: unknown;
     try {
-      const payload = await response.json();
-      if (typeof payload.detail === "string") {
-        detail = payload.detail;
-      } else if (Array.isArray(payload.detail)) {
-        const issues = payload.detail
+      payload = await response.json();
+      const errorPayload = payload as { detail?: unknown };
+      if (typeof errorPayload.detail === "string") {
+        detail = errorPayload.detail;
+      } else if (Array.isArray(errorPayload.detail)) {
+        const issues = errorPayload.detail
           .map((item: unknown) => {
             if (!item || typeof item !== "object") {
               return null;
@@ -83,7 +97,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
     } catch {
       // Keep the generic message when the server returns no JSON body.
     }
-    throw new Error(detail);
+    throw new ApiError(response.status, detail, payload);
   }
 
   if (response.status === 204) {

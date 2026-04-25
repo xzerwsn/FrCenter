@@ -34,7 +34,12 @@ export function saveSession(session: Session): void {
 
 export function loadSession(): Session | null {
   const legacyToken = readLegacyToken();
-  const userJson = localStorage.getItem(USER_KEY);
+  let userJson: string | null = null;
+  try {
+    userJson = localStorage.getItem(USER_KEY);
+  } catch {
+    return legacyToken ? { token: legacyToken, user: normalizeStoredUser({}) } : null;
+  }
   if (!userJson) {
     return legacyToken ? { token: legacyToken, user: normalizeStoredUser({}) } : null;
   }
@@ -47,8 +52,12 @@ export function loadSession(): Session | null {
 }
 
 export function clearSession(): void {
-  localStorage.removeItem(LEGACY_TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  try {
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
 }
 
 function normalizeStoredUser(raw: unknown): CurrentUser {

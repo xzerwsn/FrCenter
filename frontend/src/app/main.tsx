@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import { confirmEmail, login, logout, register } from "../api/auth";
+import { ApiError } from "../api/client";
 import {
   type Chat,
   type Message,
@@ -43,7 +44,6 @@ import {
   updateChatMessage,
   updateGroupMemberRole,
 } from "../api/chats";
-import { registerDevice } from "../api/devices";
 import {
   acceptFriendRequest,
   addFriendByCode,
@@ -65,7 +65,6 @@ import {
 } from "../api/notifications";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
-import { createDeviceKeyBundle, fingerprintPublicKey } from "../crypto/devices";
 import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
 import { decryptCacheEntriesInWorker, decryptMessagesInWorker, encryptCacheEntriesInWorker, generateSharedKeyInWorker } from "../crypto/worker-client";
@@ -138,19 +137,12 @@ function App() {
     localStorage.setItem(THEME_STORAGE_KEY, activeTheme.id);
   }, [activeTheme]);
 
-  async function handleAuthenticated(token: string, cloudPassword: string) {
+  async function handleAuthenticated(token: string) {
     const user = await getMe(token);
     const nextSession = { token, user };
     saveSession(nextSession);
     setSession(nextSession);
     setAuthBootstrapDone(true);
-    await createAndRegisterDevice(token, cloudPassword);
-  }
-
-  async function createAndRegisterDevice(token: string, cloudPassword: string) {
-    const bundle = await createDeviceKeyBundle("Windows Desktop", cloudPassword);
-    await registerDevice(token, bundle);
-    await fingerprintPublicKey(bundle.publicKey);
   }
 
   function handleLogout() {
@@ -180,8 +172,8 @@ function App() {
         saveSession(nextSession);
         setSession(nextSession);
       })
-      .catch(() => {
-        if (active) {
+      .catch((error) => {
+        if (active && isUnauthorizedError(error)) {
           clearSession();
         }
       })
@@ -209,8 +201,8 @@ function App() {
         saveSession(nextSession);
         setSession(nextSession);
       })
-      .catch(() => {
-        if (active) {
+      .catch((error) => {
+        if (active && isUnauthorizedError(error)) {
           handleLogout();
         }
       });
@@ -285,12 +277,11 @@ function LoginForm({
   onLogin,
   onSwitch,
 }: {
-  onLogin: (token: string, cloudPassword: string) => Promise<void>;
+  onLogin: (token: string) => Promise<void>;
   onSwitch: () => void;
 }) {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
-  const [cloudPassword, setCloudPassword] = React.useState("");
   const [status, setStatus] = React.useState("");
 
   async function handleSubmit(event: React.FormEvent) {
@@ -298,7 +289,7 @@ function LoginForm({
     setStatus("Входим...");
     try {
       const response = await login(email, password);
-      await onLogin(response.access_token, cloudPassword);
+      await onLogin(response.access_token);
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось войти");
@@ -314,10 +305,6 @@ function LoginForm({
       <label>
         Пароль
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
-      </label>
-      <label>
-        Облачный пароль
-        <input value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} type="password" required />
       </label>
       <button type="submit">Войти</button>
       <button className="link-button" onClick={onSwitch} type="button">
@@ -1587,7 +1574,7 @@ function FriendsPanel({
 
   React.useEffect(() => {
     void refreshFriends();
-    void loadInviteCode();
+    void loadPersonalInviteCode();
   }, [token]);
 
   async function refreshFriends() {
@@ -1619,18 +1606,7 @@ function FriendsPanel({
     }
   }
 
-  async function handleCreateInvite() {
-    setStatus("Создаем invite-код...");
-    try {
-      const response = await createInviteCode(token);
-      setInviteCode(response.code);
-      setStatus("Invite-код готов");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось создать invite-код");
-    }
-  }
-
-  async function loadInviteCode() {
+  async function loadPersonalInviteCode() {
     try {
       const response = await createInviteCode(token);
       setInviteCode(response.code);
@@ -1671,10 +1647,10 @@ function FriendsPanel({
           <span>Friends hub</span>
           <h2>Друзья</h2>
           <p>Быстрый поиск, карточки профилей и invite-код в одном пространстве без перегруза.</p>
-          <div className="friends-stats">
-            <div className="friends-stat">
-              <strong>{friends.length}</strong>
-              <span>всего друзей</span>
+        <div className="friends-stats">
+          <div className="friends-stat">
+            <strong>{friends.length}</strong>
+            <span>всего друзей</span>
             </div>
             <div className="friends-stat">
               <strong>{onlineFriends}</strong>
@@ -1719,7 +1695,7 @@ function FriendsPanel({
       </div>
 
       <div className="friends-side-column">
-        <section className="friends-panel-card">
+        <section className="friends-side-section">
           <div className="friends-card-head">
             <div className="friends-card-icon">
               <UserPlus size={18} />
@@ -1745,21 +1721,18 @@ function FriendsPanel({
           </div>
         </section>
 
-        <section className="friends-panel-card friends-invite-card">
+        <section className="friends-side-section friends-invite-card">
           <div className="friends-card-head">
             <div className="friends-card-icon">
               <Copy size={18} />
             </div>
             <div>
               <h3>Invite-код</h3>
-              <p>Создай код и поделись им, чтобы добавить друга быстрее.</p>
+              <p>У тебя один персональный код. Им можно делиться сколько угодно, кнопка генерации больше не нужна.</p>
             </div>
           </div>
           <div className="invite-code-box">{inviteCode || "Код еще не создан"}</div>
           <div className="friends-action-row">
-            <button className="inline-action" onClick={handleCreateInvite} type="button">
-              Создать код
-            </button>
             <button className="inline-action secondary" onClick={handleCopyInviteCode} type="button">
               Скопировать
             </button>
@@ -2240,7 +2213,6 @@ function ChatsPanel({
 
     try {
       const response = await listChatMessages(token, chatId, { limit: 60 });
-      const decoded = await decodeMessagesForChat(chatId, response.messages);
       if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
         return;
       }
@@ -2251,12 +2223,16 @@ function ChatsPanel({
         hasMore: response.has_more,
       };
       setMessages(response.messages);
-      setDecodeMap(decoded);
       setMessagesHasMore(response.has_more);
       setMessagesCursor({
         id: response.next_cursor_id,
         createdAt: response.next_cursor_created_at,
       });
+      const decoded = await decodeMessagesForChat(chatId, response.messages);
+      if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
+        return;
+      }
+      setDecodeMap(decoded);
       await markChatAsRead(chatId);
     } finally {
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
@@ -3149,7 +3125,7 @@ function ChatsPanel({
           </div>
         ) : null}
 
-        {messagesLoading ? <p className="form-status">Загружаем сообщения...</p> : null}
+          {messagesLoading && messages.length === 0 ? <p className="form-status">Загружаем сообщения...</p> : null}
         {loadingOlderMessages ? <p className="form-status">Подгружаем предыдущие сообщения...</p> : null}
         {selectedChatId && !messagesLoading && messages.length === 0 ? <p className="form-status">Пока нет сообщений</p> : null}
         {messages.length > 0 ? (
@@ -3451,6 +3427,10 @@ function getChatPresentation(chat: Chat, me: CurrentUser): {
     avatarUrl: chat.avatar_url,
     initials: title.slice(0, 1).toUpperCase(),
   };
+}
+
+function isUnauthorizedError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
 }
 
 function readStoredStringList(key: string): string[] {
