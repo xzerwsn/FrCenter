@@ -28,7 +28,6 @@ import { ApiError } from "../api/client";
 import {
   type Chat,
   type Message,
-  type MessageListResponse,
   addGroupMember,
   createDirectChat,
   createGroupChat,
@@ -44,23 +43,12 @@ import {
   updateGroupMemberRole,
 } from "../api/chats";
 import {
-  acceptFriendRequest,
   addFriendByCode,
   createInviteCode,
-  declineFriendRequest,
-  listFriendRequests,
   listFriends,
-  type FriendRequestResponse,
 } from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
 import { uploadEncryptedMedia } from "../api/media";
-import {
-  listNotifications,
-  markAllNotificationsRead,
-  markNotificationRead,
-  type AppNotification,
-} from "../api/notifications";
-import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
@@ -72,86 +60,30 @@ import {
   resetCryptoWorkerSession,
 } from "../crypto/worker-client";
 import { clearDecodedMessagesCache, getCachedDecodedMessages, pruneDecodedMessages, upsertCachedDecodedMessages } from "./chat-cache";
+import {
+  CHAT_KEY_PREFIX,
+  getChatMemberCount,
+  getChatPresentation,
+  mergeChatSummaries,
+  readCachedChats,
+  readStoredSelectedChatId,
+  writeCachedChats,
+  writeStoredSelectedChatId,
+} from "./chat-store";
 import { type MediaPayloadFile, VirtualMessageList } from "./chat-components";
+import { DEFAULT_NOTIFICATION_SOUND_URL, useNotificationsStore } from "./notifications-store";
+import { useRealtimeSubscription } from "./realtime-store";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
+import { applyTheme, loadStoredThemeId, persistThemeId, SITE_THEMES, type SiteTheme } from "./settings-store";
 import "../styles/globals.css";
 
 type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "games" | "clips" | "settings";
 
-const CHAT_KEY_PREFIX = "frcenter.chatKey.";
-const CHATS_CACHE_PREFIX = "frcenter.chatsCache.";
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
-const THEME_STORAGE_KEY = "frcenter.siteTheme";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
-const SELECTED_CHAT_STORAGE_KEY_PREFIX = "frcenter.selectedChat.";
-const DEFAULT_NOTIFICATION_SOUND_URL = "https://www.myinstants.com/media/sounds/hell_AJWSn3e.mp3";
-
-type SiteTheme = {
-  id: string;
-  name: string;
-  background: string;
-  surface: string;
-  text: string;
-  accent: string;
-  secondaryAccent: string;
-  swatches: string[];
-};
-
-const SITE_THEMES: SiteTheme[] = [
-  {
-    id: "classic-dark",
-    name: "Тёмная",
-    background: "#0F1722",
-    surface: "#1A2431",
-    text: "#F3F7FB",
-    accent: "#4C8DFF",
-    secondaryAccent: "#8EC5FF",
-    swatches: ["#0F1722", "#1A2431", "#F3F7FB", "#4C8DFF", "#8EC5FF"],
-  },
-  {
-    id: "classic-light",
-    name: "Светлая",
-    background: "#F4F7FB",
-    surface: "#FFFFFF",
-    text: "#18212B",
-    accent: "#3E79F7",
-    secondaryAccent: "#87B4FF",
-    swatches: ["#F4F7FB", "#FFFFFF", "#18212B", "#3E79F7", "#87B4FF"],
-  },
-  {
-    id: "ashes",
-    name: "Пепел",
-    background: "#0A0A0A",
-    surface: "#33312F",
-    text: "#B7B4AE",
-    accent: "#726E68",
-    secondaryAccent: "#371E1E",
-    swatches: ["#B7B4AE", "#726E68", "#33312F", "#371E1E", "#0A0A0A"],
-  },
-  {
-    id: "northern-lights",
-    name: "Северное сияние",
-    background: "#1F0922",
-    surface: "#4B2B55",
-    text: "#CAD5D4",
-    accent: "#89B199",
-    secondaryAccent: "#6F7074",
-    swatches: ["#1F0922", "#4B2B55", "#6F7074", "#89B199", "#CAD5D4"],
-  },
-  {
-    id: "dawn",
-    name: "Рассвет",
-    background: "#CA2851",
-    surface: "#FF6766",
-    text: "#FFE3B3",
-    accent: "#FFB173",
-    secondaryAccent: "#FFE3B3",
-    swatches: ["#CA2851", "#FF6766", "#FFB173", "#FFE3B3"],
-  },
-];
 
 type MessageContextMenuState = {
   message: Message;
@@ -171,7 +103,7 @@ function App() {
 
   React.useEffect(() => {
     applyTheme(activeTheme);
-    localStorage.setItem(THEME_STORAGE_KEY, activeTheme.id);
+    persistThemeId(activeTheme.id);
   }, [activeTheme]);
 
   async function handleAuthenticated(token: string) {
@@ -525,41 +457,26 @@ function Dashboard({
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
   const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() => [loadStoredDashboardSection()]);
-  const [notificationsOpen, setNotificationsOpen] = React.useState(false);
-  const [notifications, setNotifications] = React.useState<AppNotification[]>([]);
-  const [unreadNotifications, setUnreadNotifications] = React.useState(0);
-  const [friendRequests, setFriendRequests] = React.useState<FriendRequestResponse[]>([]);
-  const audioRef = React.useRef<HTMLAudioElement | null>(null);
-  const visibleNotifications = React.useMemo(
-    () => notifications.filter((item) => item.kind !== "friend_request"),
-    [notifications],
-  );
+  const {
+    notificationsOpen,
+    setNotificationsOpen,
+    notifications,
+    visibleNotifications,
+    unreadNotifications,
+    friendRequests,
+    openNotifications,
+    acceptIncomingFriendRequest,
+    declineIncomingFriendRequest,
+    readNotification,
+  } = useNotificationsStore({
+    token: session.token,
+    currentUser: session.user,
+    onFriendsChanged: setFriends,
+  });
 
   React.useEffect(() => {
     void listFriends(session.token).then((response) => setFriends(response.friends));
   }, [session.token]);
-
-  React.useEffect(() => {
-    void refreshNotifications();
-    void refreshFriendRequests();
-  }, [session.token]);
-
-  React.useEffect(() => {
-    let active = true;
-    void listChats(session.token)
-      .then((response) => {
-        if (!active) {
-          return;
-        }
-        writeStoredChats(session.user.id, response.chats);
-      })
-      .catch(() => {
-        // keep dashboard responsive even if prefetch fails
-      });
-    return () => {
-      active = false;
-    };
-  }, [session.token, session.user.id]);
 
   React.useEffect(() => {
     let active = true;
@@ -615,49 +532,6 @@ function Dashboard({
     setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
   }, [section]);
 
-  const playNotificationSound = React.useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) {
-      return;
-    }
-    audio.currentTime = 0;
-    void audio.play().catch(() => {
-      // Ignore autoplay restrictions until the user interacts with the page.
-    });
-  }, []);
-
-  React.useEffect(() => {
-    const socket = connectRealtime(session.token, (event: RealtimeEvent) => {
-      if (event.type === "message.new" && event.message && typeof event.message === "object") {
-        const incomingMessage = event.message as Message;
-        if (incomingMessage.sender.id !== session.user.id) {
-          playNotificationSound();
-        }
-        return;
-      }
-      if (event.type !== "notification.new" || !event.notification || typeof event.notification !== "object") {
-        return;
-      }
-      const incoming = event.notification as AppNotification;
-      setNotifications((current) => [incoming, ...current.filter((item) => item.id !== incoming.id)].slice(0, 50));
-      setUnreadNotifications((current) => current + (incoming.is_read ? 0 : 1));
-      playNotificationSound();
-      if (incoming.kind === "friend_request") {
-        void refreshFriendRequests();
-      }
-    });
-    return () => socket.close();
-  }, [playNotificationSound, session.token, session.user.id]);
-
-  React.useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio(session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
-    }
-    audioRef.current.src = session.user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL;
-    audioRef.current.preload = "auto";
-    audioRef.current.volume = Math.max(0, Math.min(1, session.user.notification_volume ?? 0.7));
-  }, [session.user.notification_sound_url, session.user.notification_volume]);
-
   function openOwnProfile() {
     setSelectedProfile(null);
     setSection("profile");
@@ -671,70 +545,6 @@ function Dashboard({
     }
     setSelectedProfile(toStoredPublicUser(user));
     setSection("profile");
-  }
-
-  async function refreshNotifications() {
-    try {
-      const response = await listNotifications(session.token);
-      setNotifications(response.notifications);
-      setUnreadNotifications(response.unread_count);
-    } catch {
-      // keep the dashboard usable even if notifications fail
-    }
-  }
-
-  async function refreshFriendRequests() {
-    try {
-      const response = await listFriendRequests(session.token);
-      setFriendRequests(response.incoming);
-    } catch {
-      // keep the dashboard usable even if friend requests fail
-    }
-  }
-
-  async function handleOpenNotifications() {
-    setNotificationsOpen(true);
-    if (unreadNotifications > 0) {
-      try {
-        await markAllNotificationsRead(session.token);
-        setUnreadNotifications(0);
-        setNotifications((current) =>
-          current.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? new Date().toISOString() })),
-        );
-      } catch {
-        // keep modal open even if read-all fails
-      }
-    }
-  }
-
-  async function handleAcceptFriendRequest(requestId: string) {
-    try {
-      await acceptFriendRequest(session.token, requestId);
-      await Promise.all([refreshFriendRequests(), refreshNotifications()]);
-      const response = await listFriends(session.token);
-      setFriends(response.friends);
-    } catch {
-      // leave the request visible if the action failed
-    }
-  }
-
-  async function handleDeclineFriendRequest(requestId: string) {
-    try {
-      await declineFriendRequest(session.token, requestId);
-      await Promise.all([refreshFriendRequests(), refreshNotifications()]);
-    } catch {
-      // leave the request visible if the action failed
-    }
-  }
-
-  async function handleReadNotification(notificationId: string) {
-    try {
-      const updated = await markNotificationRead(session.token, notificationId);
-      setNotifications((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setUnreadNotifications((current) => Math.max(0, current - 1));
-    } catch {
-      // ignore individual read failures
-    }
   }
 
   return (
@@ -831,7 +641,7 @@ function Dashboard({
       </section>
 
       <aside className="friends">
-        <button aria-label="Уведомления" className="friends-notifications-dock" onClick={() => void handleOpenNotifications()} type="button">
+        <button aria-label="Уведомления" className="friends-notifications-dock" onClick={() => void openNotifications()} type="button">
           <Bell size={18} />
           {unreadNotifications > 0 ? <span className="friends-notifications-badge">{unreadNotifications}</span> : null}
         </button>
@@ -868,10 +678,10 @@ function Dashboard({
                     хочет добавить вас в друзья.
                   </p>
                   <div className="notification-card-actions">
-                    <button onClick={() => void handleAcceptFriendRequest(request.id)} type="button">
+                    <button onClick={() => void acceptIncomingFriendRequest(request.id)} type="button">
                       Принять
                     </button>
-                    <button className="secondary" onClick={() => void handleDeclineFriendRequest(request.id)} type="button">
+                    <button className="secondary" onClick={() => void declineIncomingFriendRequest(request.id)} type="button">
                       Отклонить
                     </button>
                   </div>
@@ -886,7 +696,7 @@ function Dashboard({
                   </div>
                   <p>{notification.body}</p>
                   {!notification.is_read ? (
-                    <button className="notification-read-button" onClick={() => void handleReadNotification(notification.id)} type="button">
+                    <button className="notification-read-button" onClick={() => void readNotification(notification.id)} type="button">
                       Отметить как прочитанное
                     </button>
                   ) : null}
@@ -1808,7 +1618,7 @@ function ChatsPanel({
   friends: UserPublic[];
   onOpenProfile: (user: UserPublic) => void;
 }) {
-  const [chats, setChats] = React.useState<Chat[]>(() => readStoredChats(me.id));
+  const [chats, setChats] = React.useState<Chat[]>([]);
   const [selectedChatId, setSelectedChatId] = React.useState<string>(() => readStoredSelectedChatId(me.id));
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
@@ -1834,7 +1644,8 @@ function ChatsPanel({
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
-  const [chatsLoading, setChatsLoading] = React.useState<boolean>(() => readStoredChats(me.id).length === 0);
+  const [chatsLoading, setChatsLoading] = React.useState(true);
+  const [chatCacheHydrated, setChatCacheHydrated] = React.useState(false);
     const [messagesLoading, setMessagesLoading] = React.useState(false);
     const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
     const [messagesHasMore, setMessagesHasMore] = React.useState(false);
@@ -1932,6 +1743,28 @@ function ChatsPanel({
     }, [messages.length]);
 
   React.useEffect(() => {
+    let active = true;
+    setChatCacheHydrated(false);
+    void readCachedChats(me.id)
+      .then((cachedChats) => {
+        if (!active) {
+          return;
+        }
+        if (cachedChats.length > 0) {
+          setChats(cachedChats);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setChatCacheHydrated(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [me.id]);
+
+  React.useEffect(() => {
     void reloadChats();
   }, [token]);
 
@@ -2007,8 +1840,9 @@ function ChatsPanel({
     void loadChatMessages(selectedChatId);
   }, [selectedChatId, token]);
 
-  React.useEffect(() => {
-    const socket = connectRealtime(token, (event: RealtimeEvent) => {
+  useRealtimeSubscription(
+    token,
+    (event) => {
       if (event.type === "message.new") {
         const incoming = event.message as Message;
         bumpChatActivity(incoming.chat_id, incoming.created_at);
@@ -2108,9 +1942,8 @@ function ChatsPanel({
         }
         return;
       }
-    });
-    return () => socket.close();
-  }, [token]);
+    },
+  );
 
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -2148,8 +1981,11 @@ function ChatsPanel({
   }, [hiddenChatIds]);
 
   React.useEffect(() => {
-    writeStoredChats(me.id, chats);
-  }, [chats, me.id]);
+    if (!chatCacheHydrated) {
+      return;
+    }
+    void writeCachedChats(me.id, chats);
+  }, [chatCacheHydrated, chats, me.id]);
 
   React.useEffect(() => {
     writeStoredSelectedChatId(me.id, selectedChatId);
@@ -3389,19 +3225,6 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-function loadStoredThemeId(): string {
-  const fallback = SITE_THEMES[0].id;
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (!saved) {
-      return fallback;
-    }
-    return SITE_THEMES.some((theme) => theme.id === saved) ? saved : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function loadStoredDashboardSection(): DashboardSection {
   const fallback: DashboardSection = "home";
   try {
@@ -3454,123 +3277,6 @@ function isDashboardSection(value: string): value is DashboardSection {
     value === "clips" ||
     value === "settings"
   );
-}
-
-function applyTheme(theme: SiteTheme): void {
-  if (typeof document === "undefined") {
-    return;
-  }
-  const vars = buildThemeVars(theme);
-  const root = document.documentElement;
-  Object.entries(vars).forEach(([name, value]) => {
-    root.style.setProperty(name, value);
-  });
-}
-
-function buildThemeVars(theme: SiteTheme): Record<string, string> {
-  return {
-    "--color-bg": theme.background,
-    "--color-surface": theme.surface,
-    "--color-text": theme.text,
-    "--color-accent": theme.accent,
-    "--color-accent-2": theme.secondaryAccent,
-    "--color-surface-strong": mixHex(theme.surface, theme.background, 0.44),
-    "--color-surface-deep": mixHex(theme.surface, "#000000", 0.42),
-    "--color-input": mixHex(theme.surface, "#000000", 0.2),
-    "--color-text-muted": mixHex(theme.text, theme.surface, 0.34),
-    "--color-button-text": pickReadableText(theme.accent),
-    "--color-border": theme.secondaryAccent,
-    "--color-accent-hover": mixHex(theme.secondaryAccent, "#000000", 0.16),
-  };
-}
-
-function pickReadableText(backgroundHex: string): string {
-  const rgb = hexToRgb(backgroundHex);
-  if (!rgb) {
-    return "#0F0F0F";
-  }
-  const luma = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
-  return luma > 0.55 ? "#111111" : "#F8F8F8";
-}
-
-function mixHex(firstHex: string, secondHex: string, ratio: number): string {
-  const first = hexToRgb(firstHex);
-  const second = hexToRgb(secondHex);
-  if (!first || !second) {
-    return firstHex;
-  }
-  const safeRatio = Math.max(0, Math.min(1, ratio));
-  return rgbToHex({
-    r: Math.round(first.r * (1 - safeRatio) + second.r * safeRatio),
-    g: Math.round(first.g * (1 - safeRatio) + second.g * safeRatio),
-    b: Math.round(first.b * (1 - safeRatio) + second.b * safeRatio),
-  });
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const normalized = hex.trim().replace("#", "");
-  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
-    return null;
-  }
-  const value = Number.parseInt(normalized, 16);
-  return {
-    r: (value >> 16) & 255,
-    g: (value >> 8) & 255,
-    b: value & 255,
-  };
-}
-
-function rgbToHex(rgb: { r: number; g: number; b: number }): string {
-  const clamp = (value: number) => Math.max(0, Math.min(255, value));
-  const toHex = (value: number) => clamp(value).toString(16).padStart(2, "0");
-  return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
-}
-
-function getChatPresentation(chat: Chat, me: CurrentUser): {
-  title: string;
-  subtitle: string;
-  avatarUrl: string | null;
-  initials: string;
-} {
-  if (chat.type === "direct") {
-    const peer = chat.peer ?? chat.members?.find((member) => member.user.id !== me.id)?.user ?? null;
-    const title = peer?.username ?? "Личный чат";
-    return {
-      title,
-      subtitle: "1 на 1",
-      avatarUrl: peer?.avatar_url ?? null,
-      initials: title.slice(0, 1).toUpperCase(),
-    };
-  }
-  const title = chat.title?.trim() || "Группа";
-  return {
-    title,
-    subtitle: `${getChatMemberCount(chat)} участника`,
-    avatarUrl: chat.avatar_url,
-    initials: title.slice(0, 1).toUpperCase(),
-  };
-}
-
-function getChatMemberCount(chat: Chat): number {
-  if (typeof chat.member_count === "number" && chat.member_count > 0) {
-    return chat.member_count;
-  }
-  return chat.members?.length ?? (chat.type === "direct" ? 2 : 0);
-}
-
-function mergeChatSummaries(previous: Chat[], incoming: Chat[]): Chat[] {
-  const previousById = new Map(previous.map((chat) => [chat.id, chat]));
-  return incoming.map((chat) => {
-    const existing = previousById.get(chat.id);
-    if (!existing) {
-      return chat;
-    }
-    return {
-      ...chat,
-      members: existing.members ?? chat.members,
-      peer: chat.peer ?? existing.peer ?? null,
-    };
-  });
 }
 
 function toStoredPublicUser(user: UserPublic | CurrentUser): UserPublic {
@@ -3638,51 +3344,6 @@ function readStoredStringList(key: string): string[] {
 function writeStoredStringList(key: string, values: string[]): void {
   try {
     localStorage.setItem(key, JSON.stringify(values));
-  } catch {
-    // ignore storage write errors
-  }
-}
-
-function readStoredChats(userId: string): Chat[] {
-  try {
-    const raw = localStorage.getItem(`${CHATS_CACHE_PREFIX}${userId}`);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed as Chat[];
-  } catch {
-    return [];
-  }
-}
-
-function readStoredSelectedChatId(userId: string): string {
-  try {
-    return localStorage.getItem(`${SELECTED_CHAT_STORAGE_KEY_PREFIX}${userId}`) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeStoredSelectedChatId(userId: string, chatId: string): void {
-  try {
-    const storageKey = `${SELECTED_CHAT_STORAGE_KEY_PREFIX}${userId}`;
-    if (!chatId) {
-      localStorage.removeItem(storageKey);
-      return;
-    }
-    localStorage.setItem(storageKey, chatId);
-  } catch {
-    // ignore storage write errors
-  }
-}
-
-function writeStoredChats(userId: string, chats: Chat[]): void {
-  try {
-    localStorage.setItem(`${CHATS_CACHE_PREFIX}${userId}`, JSON.stringify(chats));
   } catch {
     // ignore storage write errors
   }
