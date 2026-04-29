@@ -50,6 +50,16 @@ import {
   listFriends,
 } from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
+import {
+  clearGameActivity,
+  connectGameAccount,
+  disconnectGameAccount,
+  getGamesOverview,
+  setGameActivity,
+  type GameAccount,
+  type GameActivity,
+  type GamePlatform,
+} from "../api/games";
 import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import {
@@ -721,7 +731,7 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("games") ? (
         <div style={{ display: section === "games" ? "block" : "none" }}>
-          <GamesPanel friends={friends} onOpenProfile={openUserProfile} />
+          <GamesPanel friends={friends} onOpenProfile={openUserProfile} onSessionUserUpdate={onSessionUserUpdate} token={session.token} />
         </div>
         ) : null}
         {mountedSections.includes("clips") ? (
@@ -1374,34 +1384,277 @@ function HomePanel({ token, onOpenProfile }: { token: string; onOpenProfile: (us
   );
 }
 
-function GamesPanel({ friends, onOpenProfile }: { friends: UserPublic[]; onOpenProfile: (user: UserPublic) => void }) {
+function GamesPanel({
+  token,
+  friends,
+  onOpenProfile,
+  onSessionUserUpdate,
+}: {
+  token: string;
+  friends: UserPublic[];
+  onOpenProfile: (user: UserPublic) => void;
+  onSessionUserUpdate: (user: CurrentUser) => void;
+}) {
+  const [accounts, setAccounts] = React.useState<GameAccount[]>([]);
+  const [activities, setActivities] = React.useState<GameActivity[]>([]);
+  const [status, setStatus] = React.useState("");
+  const [steamId, setSteamId] = React.useState("");
+  const [steamName, setSteamName] = React.useState("");
+  const [steamGame, setSteamGame] = React.useState("");
+  const [riotId, setRiotId] = React.useState("");
+  const [riotName, setRiotName] = React.useState("");
+  const [riotGame, setRiotGame] = React.useState("");
+
+  React.useEffect(() => {
+    void loadOverview();
+  }, [token]);
+
+  React.useEffect(() => {
+    const steam = accounts.find((item) => item.platform === "steam");
+    const riot = accounts.find((item) => item.platform === "riot");
+    setSteamId(steam?.external_user_id ?? "");
+    setSteamName(steam?.display_name ?? "");
+    setRiotId(riot?.external_user_id ?? "");
+    setRiotName(riot?.display_name ?? "");
+  }, [accounts]);
+
+  React.useEffect(() => {
+    const steam = activities.find((item) => item.platform === "steam");
+    const riot = activities.find((item) => item.platform === "riot");
+    setSteamGame(steam?.game_name ?? "");
+    setRiotGame(riot?.game_name ?? "");
+  }, [activities]);
+
+  async function loadOverview() {
+    const overview = await getGamesOverview(token);
+    setAccounts(overview.accounts);
+    setActivities(overview.active_activities);
+  }
+
+  async function refreshCurrentUser() {
+    const updated = await getMe(token);
+    onSessionUserUpdate(updated);
+  }
+
+  async function handleConnect(platform: GamePlatform) {
+    const externalUserId = platform === "steam" ? steamId.trim() : riotId.trim();
+    const displayName = platform === "steam" ? steamName.trim() : riotName.trim();
+    if (!externalUserId) {
+      setStatus(`Укажи ID аккаунта ${platform === "steam" ? "Steam" : "Riot"}`);
+      return;
+    }
+    setStatus(`Подключаем ${platform === "steam" ? "Steam" : "Riot"}...`);
+    try {
+      await connectGameAccount(token, {
+        platform,
+        external_user_id: externalUserId,
+        display_name: displayName || null,
+      });
+      await loadOverview();
+      setStatus(`${platform === "steam" ? "Steam" : "Riot"} подключен`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось подключить интеграцию");
+    }
+  }
+
+  async function handleDisconnect(platform: GamePlatform) {
+    setStatus(`Отключаем ${platform === "steam" ? "Steam" : "Riot"}...`);
+    try {
+      await disconnectGameAccount(token, platform);
+      await Promise.all([loadOverview(), refreshCurrentUser()]);
+      setStatus(`${platform === "steam" ? "Steam" : "Riot"} отключен`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось отключить интеграцию");
+    }
+  }
+
+  async function handleSetActivity(platform: GamePlatform) {
+    const gameName = platform === "steam" ? steamGame.trim() : riotGame.trim();
+    if (!gameName) {
+      setStatus("Укажи название игры");
+      return;
+    }
+    setStatus(`Обновляем статус ${platform === "steam" ? "Steam" : "Riot"}...`);
+    try {
+      await setGameActivity(token, {
+        platform,
+        game_name: gameName,
+        activity_type: "playing",
+      });
+      await Promise.all([loadOverview(), refreshCurrentUser()]);
+      setStatus("Игровой статус обновлен");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось обновить игровой статус");
+    }
+  }
+
+  async function handleClearActivity(platform: GamePlatform) {
+    setStatus(`Снимаем статус ${platform === "steam" ? "Steam" : "Riot"}...`);
+    try {
+      await clearGameActivity(token, platform);
+      await Promise.all([loadOverview(), refreshCurrentUser()]);
+      setStatus("Игровой статус очищен");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось очистить игровой статус");
+    }
+  }
+
   return (
-    <section className="tool-band">
-      <div>
-        <h2>Игровая зона</h2>
-        <p className="form-status">Steam и Riot: настройка интеграций будет в этом разделе.</p>
-        <div className="result-list">
-          {friends.map((friend) => (
-            <div className="result-row" key={friend.id}>
-              <button className="username-link result-username-link" onClick={() => onOpenProfile(friend)} type="button">
-                {friend.username}
-              </button>
-              <span>{friend.current_game ?? "Не играет"}</span>
-            </div>
-          ))}
+    <section className="tool-band games-panel">
+      <div className="games-main-card">
+        <div className="panel-hero panel-hero-games">
+          <span>Game sync</span>
+          <h2>Игровые интеграции</h2>
+          <p>Подключай Steam и Riot, чтобы держать игровые профили и текущие статусы в одном месте.</p>
+        </div>
+
+        <div className="games-platform-grid">
+          <GameIntegrationCard
+            account={accounts.find((item) => item.platform === "steam") ?? null}
+            activity={activities.find((item) => item.platform === "steam") ?? null}
+            displayName={steamName}
+            externalUserId={steamId}
+            gameName={steamGame}
+            onConnect={() => void handleConnect("steam")}
+            onDisconnect={() => void handleDisconnect("steam")}
+            onDisplayNameChange={setSteamName}
+            onExternalUserIdChange={setSteamId}
+            onGameNameChange={setSteamGame}
+            onSetActivity={() => void handleSetActivity("steam")}
+            onClearActivity={() => void handleClearActivity("steam")}
+            platform="steam"
+          />
+          <GameIntegrationCard
+            account={accounts.find((item) => item.platform === "riot") ?? null}
+            activity={activities.find((item) => item.platform === "riot") ?? null}
+            displayName={riotName}
+            externalUserId={riotId}
+            gameName={riotGame}
+            onConnect={() => void handleConnect("riot")}
+            onDisconnect={() => void handleDisconnect("riot")}
+            onDisplayNameChange={setRiotName}
+            onExternalUserIdChange={setRiotId}
+            onGameNameChange={setRiotGame}
+            onSetActivity={() => void handleSetActivity("riot")}
+            onClearActivity={() => void handleClearActivity("riot")}
+            platform="riot"
+          />
         </div>
       </div>
-      <div>
-        <h2>Интеграции</h2>
-        <div className="result-list">
-          <div className="result-row">
-            <span>Steam</span>
-            <button type="button">Подключить</button>
+
+      <div className="games-side-column">
+        <section className="friends-side-section">
+          <div className="friends-card-head">
+            <div className="friends-card-icon">
+              <Gamepad2 size={18} />
+            </div>
+            <div>
+              <h3>Активность друзей</h3>
+              <p>Список строится по общему `current_game`, поэтому Steam и Riot сразу видны в профилях и друзьях.</p>
+            </div>
           </div>
-          <div className="result-row">
-            <span>Riot Games</span>
-            <button type="button">Подключить</button>
+          <div className="result-list">
+            {friends.map((friend) => (
+              <div className="result-row" key={friend.id}>
+                <button className="username-link result-username-link" onClick={() => onOpenProfile(friend)} type="button">
+                  {friend.username}
+                </button>
+                <span>{friend.current_game ?? "Не играет"}</span>
+              </div>
+            ))}
+            {friends.length === 0 ? <div className="friends-empty-state">Сначала добавь друзей, чтобы видеть их игровые статусы.</div> : null}
           </div>
+        </section>
+        <p className={`form-status friends-status ${status ? "visible" : ""}`}>{status || " "}</p>
+      </div>
+    </section>
+  );
+}
+
+function GameIntegrationCard({
+  platform,
+  account,
+  activity,
+  externalUserId,
+  displayName,
+  gameName,
+  onExternalUserIdChange,
+  onDisplayNameChange,
+  onGameNameChange,
+  onConnect,
+  onDisconnect,
+  onSetActivity,
+  onClearActivity,
+}: {
+  platform: GamePlatform;
+  account: GameAccount | null;
+  activity: GameActivity | null;
+  externalUserId: string;
+  displayName: string;
+  gameName: string;
+  onExternalUserIdChange: (value: string) => void;
+  onDisplayNameChange: (value: string) => void;
+  onGameNameChange: (value: string) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onSetActivity: () => void;
+  onClearActivity: () => void;
+}) {
+  const title = platform === "steam" ? "Steam" : "Riot Games";
+  const hint = platform === "steam" ? "SteamID / vanity name" : "Riot ID / puuid";
+
+  return (
+    <section className="games-platform-card">
+      <div className="settings-card-head">
+        <div className="settings-card-icon">
+          <Gamepad2 size={18} />
+        </div>
+        <div>
+          <h3>{title}</h3>
+          <p>Подключи профиль и выстави текущую игру вручную, пока живые API только подключаются.</p>
+        </div>
+      </div>
+      <div className="settings-toggle-list">
+        <label className="settings-toggle-row settings-input-row">
+          <div>
+            <strong>ID аккаунта</strong>
+            <span>{hint}</span>
+          </div>
+          <input onChange={(event) => onExternalUserIdChange(event.target.value)} value={externalUserId} />
+        </label>
+        <label className="settings-toggle-row settings-input-row">
+          <div>
+            <strong>Отображаемое имя</strong>
+            <span>Можно оставить пустым, тогда будет локальное имя профиля.</span>
+          </div>
+          <input onChange={(event) => onDisplayNameChange(event.target.value)} value={displayName} />
+        </label>
+        <div className="games-card-actions">
+          <button className="inline-action" onClick={onConnect} type="button">
+            {account ? "Обновить аккаунт" : "Подключить"}
+          </button>
+          {account ? (
+            <button className="inline-action secondary" onClick={onDisconnect} type="button">
+              Отключить
+            </button>
+          ) : null}
+        </div>
+        <label className="settings-toggle-row settings-input-row">
+          <div>
+            <strong>Текущая игра</strong>
+            <span>{activity ? `Активно: ${activity.game_name}` : "Пока нет активного статуса"}</span>
+          </div>
+          <input onChange={(event) => onGameNameChange(event.target.value)} value={gameName} />
+        </label>
+        <div className="games-card-actions">
+          <button className="inline-action" onClick={onSetActivity} type="button">
+            Поставить статус
+          </button>
+          {activity ? (
+            <button className="inline-action secondary" onClick={onClearActivity} type="button">
+              Очистить статус
+            </button>
+          ) : null}
         </div>
       </div>
     </section>
