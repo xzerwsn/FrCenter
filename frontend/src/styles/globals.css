@@ -2122,14 +2122,75 @@ a:hover {
   background: var(--color-surface-deep);
 }
 
-.media-inline-audio {
-  width: min(360px, 100%);
-}
-
 .media-file-link {
   color: var(--color-text);
   text-decoration: underline;
   cursor: pointer;
+}
+
+.voice-message-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: min(360px, 100%);
+  max-width: 100%;
+  border-radius: 20px;
+  padding: 10px 12px;
+  color: #f3dde8;
+  background: linear-gradient(180deg, rgb(73 54 63 / 96%), rgb(50 37 45 / 98%));
+}
+
+.voice-message-audio {
+  display: none;
+}
+
+.voice-message-play {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  color: #fff0f6;
+  background: linear-gradient(180deg, #d85b96, #b8477d);
+  cursor: pointer;
+}
+
+.voice-message-body {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 6px;
+}
+
+.voice-message-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+}
+
+.voice-message-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: rgb(255 214 231 / 0.45);
+}
+
+.voice-message-bar.playing {
+  background: rgb(255 214 231 / 0.88);
+}
+
+.voice-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgb(255 214 231 / 0.74);
+  font-size: 0.78rem;
+}
+
+.voice-message-meta time {
+  margin-left: auto;
 }
 
 .composer-form {
@@ -2192,6 +2253,39 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.voice-preview-card {
+  display: grid;
+  gap: 8px;
+  width: min(360px, 100%);
+  border-radius: 18px;
+  padding: 10px 12px;
+  background: var(--color-input);
+}
+
+.voice-preview-audio {
+  width: 100%;
+}
+
+.voice-preview-meta {
+  display: flex;
+  gap: 10px;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.voice-preview-remove {
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-text);
+  background: var(--color-accent-2);
+  cursor: pointer;
 }
 
 .voice-recording-indicator {
@@ -3113,8 +3207,12 @@ a:hover {
     order: 0;
   }
 
-  .composer-form > button[type="submit"] {
+  .composer-voice-button {
     order: 2;
+  }
+
+  .composer-form > button[type="submit"] {
+    order: 3;
     width: 100%;
   }
 

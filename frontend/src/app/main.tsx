@@ -93,6 +93,14 @@ type MessageContextMenuState = {
   y: number;
 };
 
+type ComposerAttachment = {
+  id: string;
+  file: File;
+  kind: "file" | "voice";
+  previewUrl: string | null;
+  durationSeconds: number | null;
+};
+
 function App() {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
   const [authMode, setAuthMode] = React.useState<AuthMode>("login");
@@ -1640,7 +1648,7 @@ function ChatsPanel({
   const [selectedChatId, setSelectedChatId] = React.useState<string>(() => readStoredSelectedChatId(me.id));
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [messageText, setMessageText] = React.useState("");
-  const [attachmentFiles, setAttachmentFiles] = React.useState<File[]>([]);
+  const [composerAttachments, setComposerAttachments] = React.useState<ComposerAttachment[]>([]);
   const [composerDragActive, setComposerDragActive] = React.useState(false);
   const [decodeMap, setDecodeMap] = React.useState<Record<string, string>>({});
   const [createChatOpen, setCreateChatOpen] = React.useState(false);
@@ -1690,6 +1698,7 @@ function ChatsPanel({
   const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
   const voiceStreamRef = React.useRef<MediaStream | null>(null);
   const voiceChunksRef = React.useRef<Blob[]>([]);
+  const composerAttachmentsRef = React.useRef<ComposerAttachment[]>([]);
     const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
     const selectedChatIdRef = React.useRef<string>("");
     const messageRequestRef = React.useRef(0);
@@ -1982,9 +1991,18 @@ function ChatsPanel({
   }, []);
 
   React.useEffect(() => {
+    composerAttachmentsRef.current = composerAttachments;
+  }, [composerAttachments]);
+
+  React.useEffect(() => {
     return () => {
       mediaRecorderRef.current?.stop();
       voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      composerAttachmentsRef.current.forEach((item) => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
     };
   }, []);
 
@@ -2509,7 +2527,7 @@ function ChatsPanel({
           }
           const extension = blobType.includes("ogg") ? "ogg" : "webm";
           const voiceFile = new File([blob], `voice-note-${Date.now()}.${extension}`, { type: blobType });
-          addFilesToComposer([voiceFile]);
+          void addFilesToComposer([voiceFile]);
           setStatus("Голосовое добавлено в сообщение");
         },
         { once: true },
@@ -2533,7 +2551,7 @@ function ChatsPanel({
     }
 
     const text = messageText.trim();
-    if (!text && attachmentFiles.length === 0) {
+    if (!text && composerAttachments.length === 0) {
       setStatus("Введите сообщение или прикрепите файл");
       return;
     }
@@ -2579,12 +2597,12 @@ function ChatsPanel({
         });
         bumpChatActivity(activeChatId, sentMessage.created_at);
       }
-      if (attachmentFiles.length > 0) {
-        const batches = chunkArray(attachmentFiles, 10);
+      if (composerAttachments.length > 0) {
+        const batches = chunkArray(composerAttachments, 10);
         for (let index = 0; index < batches.length; index += 1) {
           const batch = batches[index];
           setStatus(`Шифруем и отправляем вложения ${index + 1}/${batches.length}...`);
-          const uploadedFiles = await Promise.all(batch.map((file) => uploadEncryptedAttachment(file)));
+          const uploadedFiles = await Promise.all(batch.map((item) => uploadEncryptedAttachment(item.file)));
           const chatKey = await ensureChatKey(selectedChatId);
           const encryptedPayload = await encryptTextForSharedKey(
             JSON.stringify({
@@ -2601,7 +2619,7 @@ function ChatsPanel({
           bumpChatActivity(selectedChatId, sentBatchMessage.created_at);
         }
       }
-      setAttachmentFiles([]);
+      clearComposerAttachments();
       setStatus("");
     } catch (error) {
       if (text) {
@@ -2624,18 +2642,40 @@ function ChatsPanel({
     }
   }
 
-  function addFilesToComposer(files: File[]) {
+  async function addFilesToComposer(files: File[]) {
     if (files.length === 0) {
       return;
     }
-    setAttachmentFiles((current) => [...current, ...files]);
+    const nextItems = await Promise.all(files.map((file) => buildComposerAttachment(file)));
+    setComposerAttachments((current) => [...current, ...nextItems]);
+  }
+
+  function removeComposerAttachment(attachmentId: string) {
+    setComposerAttachments((current) => {
+      const target = current.find((item) => item.id === attachmentId);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return current.filter((item) => item.id !== attachmentId);
+    });
+  }
+
+  function clearComposerAttachments() {
+    setComposerAttachments((current) => {
+      current.forEach((item) => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
+      return [];
+    });
   }
 
   function addFilesFromFileList(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) {
       return;
     }
-    addFilesToComposer(Array.from(fileList));
+    void addFilesToComposer(Array.from(fileList));
   }
 
   function handlePasteAttachments(event: React.ClipboardEvent<HTMLDivElement | HTMLInputElement>) {
@@ -2654,7 +2694,7 @@ function ChatsPanel({
     }
     if (files.length > 0) {
       event.preventDefault();
-      addFilesToComposer(files);
+      void addFilesToComposer(files);
     }
   }
 
@@ -3255,42 +3295,51 @@ function ChatsPanel({
           >
             <Paperclip size={16} />
           </button>
-          <button
-            aria-label={isRecordingVoice ? "Остановить запись голосового" : "Записать голосовое"}
-            className={`composer-icon-button ${isRecordingVoice ? "recording" : ""}`}
-            disabled={!selectedChatId || isSendingMessage}
-            onClick={() => void handleVoiceRecordToggle()}
-            type="button"
-          >
-            {isRecordingVoice ? <Square size={16} /> : <Mic size={16} />}
-          </button>
           <input
             onChange={(event) => setMessageText(event.target.value)}
             placeholder={isRecordingVoice ? "Идет запись голосового..." : "Сообщение"}
             value={messageText}
           />
           <button
-            disabled={!selectedChatId || isSendingMessage || (!messageText.trim() && attachmentFiles.length === 0)}
+            aria-label={isRecordingVoice ? "Остановить запись голосового" : "Записать голосовое"}
+            className={`composer-icon-button composer-voice-button ${isRecordingVoice ? "recording" : ""}`}
+            disabled={!selectedChatId || isSendingMessage}
+            onClick={() => void handleVoiceRecordToggle()}
+            type="button"
+          >
+            {isRecordingVoice ? <Square size={16} /> : <Mic size={16} />}
+          </button>
+          <button
+            disabled={!selectedChatId || isSendingMessage || (!messageText.trim() && composerAttachments.length === 0)}
             type="submit"
           >
             {isSendingMessage ? "Отправка..." : "Отправить"}
           </button>
         </form>
 
-        {attachmentFiles.length > 0 ? (
+        {composerAttachments.length > 0 ? (
           <div className="attachment-list">
-            {attachmentFiles.map((file, index) => (
-              <div className="attachment-chip" key={`${file.name}-${file.size}-${index}`}>
-                <span>{file.name}</span>
-                <button
-                  aria-label="Убрать файл"
-                  onClick={() => setAttachmentFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                  type="button"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
+            {composerAttachments.map((item) =>
+              item.kind === "voice" && item.previewUrl ? (
+                <div className="voice-preview-card" key={item.id}>
+                  <audio className="voice-preview-audio" controls preload="metadata" src={item.previewUrl} />
+                  <div className="voice-preview-meta">
+                    <span>{formatDuration(item.durationSeconds)}</span>
+                    <span>{formatFileSize(item.file.size)}</span>
+                  </div>
+                  <button aria-label="Убрать голосовое" className="voice-preview-remove" onClick={() => removeComposerAttachment(item.id)} type="button">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <div className="attachment-chip" key={item.id}>
+                  <span>{item.file.name}</span>
+                  <button aria-label="Убрать файл" onClick={() => removeComposerAttachment(item.id)} type="button">
+                    <X size={14} />
+                  </button>
+                </div>
+              ),
+            )}
           </div>
         ) : null}
 
@@ -3474,6 +3523,40 @@ async function uploadPublicVisualAsset(token: string, file: File, category: stri
   return uploaded.asset_url;
 }
 
+async function buildComposerAttachment(file: File): Promise<ComposerAttachment> {
+  const isVoice = file.type.startsWith("audio/");
+  const previewUrl = isVoice ? URL.createObjectURL(file) : null;
+  const durationSeconds = previewUrl ? await readAudioDuration(previewUrl) : null;
+  return {
+    id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
+    file,
+    kind: isVoice ? "voice" : "file",
+    previewUrl,
+    durationSeconds,
+  };
+}
+
+async function readAudioDuration(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const audio = document.createElement("audio");
+    const cleanup = () => {
+      audio.removeAttribute("src");
+      audio.load();
+    };
+    audio.preload = "metadata";
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : null;
+      cleanup();
+      resolve(duration);
+    };
+    audio.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+    audio.src = url;
+  });
+}
+
 function normalizeStatus(status: string | null | undefined): "online" | "offline" | "dnd" | "away" {
   if (status === "online" || status === "offline" || status === "dnd" || status === "away") {
     return status;
@@ -3509,6 +3592,27 @@ function formatChatListTime(value: string): string {
     return "";
   }
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(value: number | null): string {
+  if (!value || !Number.isFinite(value)) {
+    return "00:00";
+  }
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatFileSize(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(1)} MB`;
 }
 
 function getChatListPreview(

@@ -1,4 +1,5 @@
 import React from "react";
+import { Pause, Play } from "lucide-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import type { Message } from "../api/chats";
@@ -21,6 +22,7 @@ export const MediaMessageView = React.memo(function MediaMessageView({
   raw,
   onPreview,
   ensureChatKey,
+  messageCreatedAt,
 }: {
   chatId: string;
   onMediaReady: () => void;
@@ -28,6 +30,7 @@ export const MediaMessageView = React.memo(function MediaMessageView({
   raw: string;
   onPreview: (url: string, mediaType: string) => void;
   ensureChatKey: (chatId: string) => Promise<string>;
+  messageCreatedAt: string;
 }) {
   const mediaPayloadFiles = React.useMemo(() => parseMediaPayloadFiles(raw), [raw]);
   const [resolvedFiles, setResolvedFiles] = React.useState<Array<{ payload: MediaPayloadFile; url: string }>>([]);
@@ -115,7 +118,14 @@ export const MediaMessageView = React.memo(function MediaMessageView({
                 src={url}
               />
             ) : null}
-            {isAudio ? <audio className="media-inline-audio" controls src={url} /> : null}
+            {isAudio ? (
+              <VoiceMessageCard
+                createdAt={messageCreatedAt}
+                fileSize={payload.file_size}
+                fileName={payload.file_name}
+                src={url}
+              />
+            ) : null}
             {!isImage && !isVideo && !isAudio ? (
               <a className="media-file-link" download={payload.file_name} href={url} rel="noreferrer" target="_blank">
                 {payload.file_name}
@@ -197,6 +207,7 @@ const MessageBubble = React.memo(function MessageBubble({
           onPreview={onPreviewMedia}
           raw={decodedText}
           token={token}
+          messageCreatedAt={message.created_at}
         />
       ) : (
         <p>{decodedText}</p>
@@ -334,4 +345,114 @@ function normalizeMediaPayloadFile(payload: Partial<MediaPayloadFile> | null | u
     file_mime: payload.file_mime ?? "application/octet-stream",
     file_nonce: payload.file_nonce ?? "",
   };
+}
+
+const VoiceMessageCard = React.memo(function VoiceMessageCard({
+  src,
+  fileName,
+  fileSize,
+  createdAt,
+}: {
+  src: string;
+  fileName: string;
+  fileSize: number;
+  createdAt: string;
+}) {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [duration, setDuration] = React.useState<number | null>(null);
+  const bars = React.useMemo(() => createWaveBars(fileName), [fileName]);
+
+  React.useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    const handleLoadedMetadata = () => {
+      if (Number.isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+    const handleEnded = () => {
+      setIsPlaying(false);
+      audio.currentTime = 0;
+    };
+    const handlePause = () => setIsPlaying(false);
+    const handlePlay = () => setIsPlaying(true);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("play", handlePlay);
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("play", handlePlay);
+    };
+  }, []);
+
+  async function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    if (audio.paused) {
+      await audio.play();
+      return;
+    }
+    audio.pause();
+  }
+
+  return (
+    <div className="voice-message-card">
+      <audio className="voice-message-audio" preload="metadata" ref={audioRef} src={src} />
+      <button className="voice-message-play" onClick={() => void togglePlayback()} type="button">
+        {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+      </button>
+      <div className="voice-message-body">
+        <div className="voice-message-waveform" aria-hidden="true">
+          {bars.map((height, index) => (
+            <span className={`voice-message-bar ${isPlaying ? "playing" : ""}`} key={`${index}-${height}`} style={{ height }} />
+          ))}
+        </div>
+        <div className="voice-message-meta">
+          <span>{formatDuration(duration)}</span>
+          <span>{formatFileSize(fileSize)}</span>
+          <time>{formatMessageTime(createdAt)}</time>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function createWaveBars(seed: string): number[] {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return Array.from({ length: 44 }, (_value, index) => {
+    const value = ((hash >> (index % 16)) + index * 17) % 24;
+    return Math.max(8, value + 8);
+  });
+}
+
+function formatDuration(value: number | null): string {
+  if (!value || !Number.isFinite(value)) {
+    return "00:00";
+  }
+  const totalSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatFileSize(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(1)} MB`;
 }
