@@ -51,7 +51,9 @@ def create_app() -> FastAPI:
             return response
 
         path = request.url.path
-        if path.startswith("/api/media/"):
+        if path.startswith("/api/media/public/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=2592000, immutable")
+        elif path.startswith("/api/media/"):
             response.headers.setdefault("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400")
         elif path == "/health":
             response.headers.setdefault("Cache-Control", "no-store")

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -22,6 +23,14 @@ router = APIRouter()
 class MediaUploadResponse(BaseModel):
     media_id: str
     media_url: str
+    size: int
+    mime_type: str
+    filename: str
+
+
+class PublicMediaUploadResponse(BaseModel):
+    asset_url: str
+    storage_key: str
     size: int
     mime_type: str
     filename: str
@@ -79,6 +88,40 @@ async def upload_media(
     )
 
 
+@router.post("/public-upload", response_model=PublicMediaUploadResponse)
+async def upload_public_media(
+    file: UploadFile = File(...),
+    category: str = Form("avatar"),
+    current_user: User = Depends(get_current_user),
+) -> PublicMediaUploadResponse:
+    _ = current_user
+    storage = get_media_storage()
+    asset_id = str(uuid4())
+    try:
+        storage_key, size = await storage.store_public_upload(
+            asset_id,
+            file,
+            category=category,
+            max_size_bytes=10 * 1024 * 1024,
+            require_image=True,
+        )
+    except Exception as exc:
+        detail = exc.args[0] if exc.args else "Failed to store public asset"
+        status_code = 413 if "too large" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    if size == 0:
+        storage.delete(storage_key)
+        raise HTTPException(status_code=400, detail="Public asset is empty")
+
+    return PublicMediaUploadResponse(
+        asset_url=f"{settings.backend_url}/api/media/public/{storage_key}",
+        storage_key=storage_key,
+        size=size,
+        mime_type=file.content_type or "application/octet-stream",
+        filename=file.filename or Path(storage_key).name,
+    )
+
+
 @router.get("/{media_id}")
 async def download_media(
     media_id: str,
@@ -131,3 +174,19 @@ async def download_media(
         raise HTTPException(status_code=404, detail="Media object missing")
 
     return Response(content=media.encrypted_bytes, media_type="application/octet-stream", headers=headers)
+
+
+@router.get("/public/{asset_path:path}")
+async def download_public_media(asset_path: str) -> FileResponse:
+    storage = get_media_storage()
+    try:
+        file_path = storage.resolve_path(asset_path)
+    except MissingMediaObject as exc:
+        raise HTTPException(status_code=404, detail="Public asset not found") from exc
+
+    return FileResponse(
+        file_path,
+        headers={
+            "Cache-Control": "public, max-age=2592000, immutable",
+        },
+    )

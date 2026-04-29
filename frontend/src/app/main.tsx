@@ -9,6 +9,7 @@ import {
   Gamepad2,
   Home,
   LogOut,
+  Mic,
   MessageCircle,
   MoreHorizontal,
   Palette,
@@ -18,6 +19,7 @@ import {
   PinOff,
   PlaySquare,
   Settings,
+  Square,
   UserRound,
   Users,
   X,
@@ -48,7 +50,7 @@ import {
   listFriends,
 } from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
-import { uploadEncryptedMedia } from "../api/media";
+import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
@@ -806,6 +808,7 @@ function ProfilePanel({
 
   async function handleSingleImagePick(
     file: File | null,
+    category: string,
     setter: React.Dispatch<React.SetStateAction<string>>,
     errorText: string,
   ) {
@@ -814,9 +817,11 @@ function ProfilePanel({
       return;
     }
     try {
-      setter(await fileToDataUrl(file));
-    } catch {
-      setStatusText(errorText);
+      setStatusText("Загружаем изображение...");
+      setter(await uploadPublicVisualAsset(token, file, category));
+      setStatusText("");
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : errorText);
     }
   }
 
@@ -826,9 +831,11 @@ function ProfilePanel({
       return;
     }
     try {
-      setPublishImageUrl(await fileToDataUrl(file));
-    } catch {
-      setStatusText("Не удалось загрузить фото публикации");
+      setStatusText("Загружаем фото публикации...");
+      setPublishImageUrl(await uploadPublicVisualAsset(token, file, "profile-photo"));
+      setStatusText("");
+    } catch (error) {
+      setStatusText(error instanceof Error ? error.message : "Не удалось загрузить фото публикации");
     }
   }
 
@@ -1056,21 +1063,32 @@ function ProfilePanel({
               <input
                 accept="image/*"
                 className="visually-hidden"
-                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setAvatarUrl, "Не удалось загрузить аватар")}
+                onChange={(event) =>
+                  void handleSingleImagePick(event.target.files?.[0] ?? null, "profile-avatar", setAvatarUrl, "Не удалось загрузить аватар")
+                }
                 ref={avatarInputRef}
                 type="file"
               />
               <input
                 accept="image/*"
                 className="visually-hidden"
-                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBannerUrl, "Не удалось загрузить баннер")}
+                onChange={(event) =>
+                  void handleSingleImagePick(event.target.files?.[0] ?? null, "profile-banner", setBannerUrl, "Не удалось загрузить баннер")
+                }
                 ref={bannerInputRef}
                 type="file"
               />
               <input
                 accept="image/*"
                 className="visually-hidden"
-                onChange={(event) => void handleSingleImagePick(event.target.files?.[0] ?? null, setBackgroundUrl, "Не удалось загрузить фон")}
+                onChange={(event) =>
+                  void handleSingleImagePick(
+                    event.target.files?.[0] ?? null,
+                    "profile-background",
+                    setBackgroundUrl,
+                    "Не удалось загрузить фон",
+                  )
+                }
                 ref={backgroundInputRef}
                 type="file"
               />
@@ -1644,6 +1662,7 @@ function ChatsPanel({
   const [hiddenChatIds, setHiddenChatIds] = React.useState<string[]>(() => readStoredStringList(HIDDEN_CHATS_STORAGE_KEY));
   const [status, setStatus] = React.useState("");
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = React.useState(false);
   const [chatsLoading, setChatsLoading] = React.useState(true);
   const [chatCacheHydrated, setChatCacheHydrated] = React.useState(false);
     const [messagesLoading, setMessagesLoading] = React.useState(false);
@@ -1668,6 +1687,9 @@ function ChatsPanel({
   const backgroundInputRef = React.useRef<HTMLInputElement | null>(null);
   const editAvatarInputRef = React.useRef<HTMLInputElement | null>(null);
   const editBackgroundInputRef = React.useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = React.useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = React.useRef<MediaStream | null>(null);
+  const voiceChunksRef = React.useRef<Blob[]>([]);
     const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
     const selectedChatIdRef = React.useRef<string>("");
     const messageRequestRef = React.useRef(0);
@@ -1957,6 +1979,13 @@ function ChatsPanel({
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stop();
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   React.useEffect(() => {
@@ -2433,6 +2462,70 @@ function ChatsPanel({
     };
   }
 
+  async function handleVoiceRecordToggle() {
+    if (isRecordingVoice) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    if (!selectedChatId) {
+      setStatus("Сначала выбери чат");
+      return;
+    }
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setStatus("Запись голосовых не поддерживается в этом браузере");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
+          ? "audio/ogg;codecs=opus"
+          : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      voiceChunksRef.current = [];
+      voiceStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          voiceChunksRef.current.push(event.data);
+        }
+      });
+      recorder.addEventListener(
+        "stop",
+        () => {
+          const blobType = recorder.mimeType || "audio/webm";
+          const blob = new Blob(voiceChunksRef.current, { type: blobType });
+          voiceChunksRef.current = [];
+          voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+          voiceStreamRef.current = null;
+          mediaRecorderRef.current = null;
+          setIsRecordingVoice(false);
+          if (blob.size === 0) {
+            setStatus("Голосовое получилось пустым");
+            return;
+          }
+          const extension = blobType.includes("ogg") ? "ogg" : "webm";
+          const voiceFile = new File([blob], `voice-note-${Date.now()}.${extension}`, { type: blobType });
+          addFilesToComposer([voiceFile]);
+          setStatus("Голосовое добавлено в сообщение");
+        },
+        { once: true },
+      );
+      recorder.start();
+      setIsRecordingVoice(true);
+      setStatus("Идет запись голосового...");
+    } catch (error) {
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceStreamRef.current = null;
+      mediaRecorderRef.current = null;
+      setIsRecordingVoice(false);
+      setStatus(error instanceof Error ? error.message : "Не удалось начать запись");
+    }
+  }
+
   async function handleSendComposer(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedChatId) {
@@ -2571,9 +2664,11 @@ function ChatsPanel({
       return;
     }
     try {
-      setChatAvatarDataUrl(await fileToDataUrl(file));
-    } catch {
-      setStatus("Не удалось загрузить аватар");
+      setStatus("Загружаем аватар чата...");
+      setChatAvatarDataUrl(await uploadPublicVisualAsset(token, file, "chat-avatar"));
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить аватар");
     }
   }
 
@@ -2583,9 +2678,11 @@ function ChatsPanel({
       return;
     }
     try {
-      setChatBackgroundDataUrl(await fileToDataUrl(file));
-    } catch {
-      setStatus("Не удалось загрузить фон");
+      setStatus("Загружаем фон чата...");
+      setChatBackgroundDataUrl(await uploadPublicVisualAsset(token, file, "chat-background"));
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить фон");
     }
   }
 
@@ -2595,9 +2692,11 @@ function ChatsPanel({
       return;
     }
     try {
-      setEditChatAvatarDataUrl(await fileToDataUrl(file));
-    } catch {
-      setStatus("Не удалось загрузить аватар");
+      setStatus("Загружаем аватар чата...");
+      setEditChatAvatarDataUrl(await uploadPublicVisualAsset(token, file, "chat-avatar"));
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить аватар");
     }
   }
 
@@ -2607,9 +2706,11 @@ function ChatsPanel({
       return;
     }
     try {
-      setEditChatBackgroundDataUrl(await fileToDataUrl(file));
-    } catch {
-      setStatus("Не удалось загрузить фон");
+      setStatus("Загружаем фон чата...");
+      setEditChatBackgroundDataUrl(await uploadPublicVisualAsset(token, file, "chat-background"));
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить фон");
     }
   }
 
@@ -3154,9 +3255,18 @@ function ChatsPanel({
           >
             <Paperclip size={16} />
           </button>
+          <button
+            aria-label={isRecordingVoice ? "Остановить запись голосового" : "Записать голосовое"}
+            className={`composer-icon-button ${isRecordingVoice ? "recording" : ""}`}
+            disabled={!selectedChatId || isSendingMessage}
+            onClick={() => void handleVoiceRecordToggle()}
+            type="button"
+          >
+            {isRecordingVoice ? <Square size={16} /> : <Mic size={16} />}
+          </button>
           <input
             onChange={(event) => setMessageText(event.target.value)}
-            placeholder="Сообщение"
+            placeholder={isRecordingVoice ? "Идет запись голосового..." : "Сообщение"}
             value={messageText}
           />
           <button
@@ -3181,6 +3291,13 @@ function ChatsPanel({
                 </button>
               </div>
             ))}
+          </div>
+        ) : null}
+
+        {isRecordingVoice ? (
+          <div className="voice-recording-indicator">
+            <span className="voice-recording-dot" />
+            <span>Запись идет</span>
           </div>
         ) : null}
 
@@ -3352,20 +3469,9 @@ function dedupeMessagesById(items: Message[]): Message[] {
   });
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = reader.result;
-      if (typeof value === "string") {
-        resolve(value);
-        return;
-      }
-      reject(new Error("Failed to convert file to data URL"));
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
+async function uploadPublicVisualAsset(token: string, file: File, category: string): Promise<string> {
+  const uploaded = await uploadPublicMedia(token, file, category);
+  return uploaded.asset_url;
 }
 
 function normalizeStatus(status: string | null | undefined): "online" | "offline" | "dnd" | "away" {

@@ -2171,6 +2171,11 @@ a:hover {
   background: var(--color-input) !important;
 }
 
+.composer-icon-button.recording {
+  background: color-mix(in srgb, #ff5a5a 22%, var(--color-input)) !important;
+  color: #ff4d4d !important;
+}
+
 .attachment-chip {
   margin-top: 8px;
   display: inline-flex;
@@ -2187,6 +2192,22 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.voice-recording-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.voice-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ff4d4d;
+  box-shadow: 0 0 0 6px color-mix(in srgb, #ff4d4d 16%, transparent);
 }
 
 .attachment-chip button {
