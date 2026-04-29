@@ -274,6 +274,7 @@ export const VirtualMessageList = React.memo(function VirtualMessageList({
 
   return (
     <Virtuoso
+      alignToBottom
       atBottomStateChange={onAtBottomChange}
       className="message-list"
       computeItemKey={(_index, message) => message.id}
