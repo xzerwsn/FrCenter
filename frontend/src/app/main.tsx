@@ -117,8 +117,8 @@ function App() {
   }, [activeTheme]);
 
   async function handleAuthenticated(_token: string) {
-    const user = await getMe();
-    const nextSession = { token: "", user };
+    const user = await getMe(_token);
+    const nextSession = { token: _token, user };
     saveSession(nextSession);
     setSession(nextSession);
     setAuthBootstrapDone(true);
@@ -203,12 +203,12 @@ function App() {
       return;
     }
     let active = true;
-    void getMe()
+    void getMe(session.token || undefined)
       .then((user) => {
         if (!active) {
           return;
         }
-        const nextSession = { token: "", user };
+        const nextSession = { token: session.token, user };
         saveSession(nextSession);
         setSession(nextSession);
       })

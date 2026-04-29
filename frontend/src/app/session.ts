@@ -10,7 +10,11 @@ export type Session = {
 
 export function saveSession(session: Session): void {
   try {
-    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    if (session.token) {
+      localStorage.setItem(LEGACY_TOKEN_KEY, session.token);
+    } else {
+      localStorage.removeItem(LEGACY_TOKEN_KEY);
+    }
   } catch {
     // Ignore cleanup failures for legacy token storage.
   }
@@ -33,8 +37,10 @@ export function saveSession(session: Session): void {
 }
 
 export function loadSession(): Session | null {
+  let token = "";
   let userJson: string | null = null;
   try {
+    token = localStorage.getItem(LEGACY_TOKEN_KEY) ?? "";
     userJson = localStorage.getItem(USER_KEY);
   } catch {
     return null;
@@ -44,9 +50,9 @@ export function loadSession(): Session | null {
   }
 
   try {
-    return { token: "", user: normalizeStoredUser(JSON.parse(userJson)) };
+    return { token, user: normalizeStoredUser(JSON.parse(userJson)) };
   } catch {
-    return { token: "", user: normalizeStoredUser({}) };
+    return { token, user: normalizeStoredUser({}) };
   }
 }
 
