@@ -55,7 +55,14 @@ async def list_chats(
     db: AsyncSession = Depends(get_db),
 ) -> ChatListResponse:
     chats = await list_user_chats(db, current_user)
-    return ChatListResponse(chats=[ChatSummaryResponse.model_validate(chat) for chat in chats])
+    payload = []
+    for chat in chats:
+        summary = ChatSummaryResponse.model_validate(chat)
+        summary.background_url = None
+        if summary.avatar_url and summary.avatar_url.startswith("data:"):
+            summary.avatar_url = None
+        payload.append(summary)
+    return ChatListResponse(chats=payload)
 
 
 @router.post("/direct", response_model=ChatResponse, status_code=status.HTTP_201_CREATED)

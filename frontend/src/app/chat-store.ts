@@ -29,25 +29,31 @@ const db = new ChatSummaryDatabase();
 
 export async function readCachedChats(userId: string): Promise<Chat[]> {
   const rows = await db.chatSummaries.where("userId").equals(userId).toArray();
-  return rows
+  const latestByChatId = new Map<string, CachedChatSummary>();
+  for (const row of rows) {
+    const existing = latestByChatId.get(row.chatId);
+    if (!existing || existing.updatedAt.localeCompare(row.updatedAt) < 0) {
+      latestByChatId.set(row.chatId, row);
+    }
+  }
+  return [...latestByChatId.values()]
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .map((row) => row.payload);
 }
 
 export async function writeCachedChats(userId: string, chats: Chat[]): Promise<void> {
   const updatedAt = new Date().toISOString();
+  const dedupedChats = dedupeChatsById(chats);
   await db.transaction("rw", db.chatSummaries, async () => {
     const existing = await db.chatSummaries.where("userId").equals(userId).toArray();
-    const incomingIds = new Set(chats.map((chat) => chat.id));
     const idsToDelete = existing
-      .filter((item) => !incomingIds.has(item.chatId))
       .map((item) => item.id)
       .filter((item): item is number => typeof item === "number");
     if (idsToDelete.length > 0) {
       await db.chatSummaries.bulkDelete(idsToDelete);
     }
     await db.chatSummaries.bulkPut(
-      chats.map((chat) => ({
+      dedupedChats.map((chat) => ({
         userId,
         chatId: chat.id,
         payload: toCachedChatSummary(chat),
@@ -121,18 +127,40 @@ export function getChatMemberCount(chat: Chat): number {
 }
 
 export function mergeChatSummaries(previous: Chat[], incoming: Chat[]): Chat[] {
+  const nextById = new Map<string, Chat>();
   const previousById = new Map(previous.map((chat) => [chat.id, chat]));
-  return incoming.map((chat) => {
+  for (const chat of incoming) {
     const existing = previousById.get(chat.id);
+    nextById.set(chat.id, !existing
+      ? chat
+      : {
+          ...chat,
+          members: existing.members ?? chat.members,
+          peer: chat.peer ?? existing.peer ?? null,
+        });
+  }
+  return [...nextById.values()];
+}
+
+function dedupeChatsById(chats: Chat[]): Chat[] {
+  const latestById = new Map<string, Chat>();
+  for (const chat of chats) {
+    const existing = latestById.get(chat.id);
     if (!existing) {
-      return chat;
+      latestById.set(chat.id, chat);
+      continue;
     }
-    return {
-      ...chat,
-      members: existing.members ?? chat.members,
-      peer: chat.peer ?? existing.peer ?? null,
-    };
-  });
+    const existingUpdatedAt = existing.last_message_at ?? existing.updated_at ?? existing.created_at;
+    const chatUpdatedAt = chat.last_message_at ?? chat.updated_at ?? chat.created_at;
+    if (existingUpdatedAt.localeCompare(chatUpdatedAt) <= 0) {
+      latestById.set(chat.id, {
+        ...chat,
+        members: chat.members ?? existing.members,
+        peer: chat.peer ?? existing.peer ?? null,
+      });
+    }
+  }
+  return [...latestById.values()];
 }
 
 function toCachedChatSummary(chat: Chat): Chat {
