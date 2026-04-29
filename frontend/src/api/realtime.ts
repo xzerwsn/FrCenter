@@ -1,4 +1,4 @@
-const backendHttpUrl = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
+import { getBackendWebSocketBaseUrl } from "../config/backend-url";
 
 export type RealtimeEvent =
   | {
@@ -92,7 +92,7 @@ function ensureConnected(): void {
     return;
   }
 
-  const wsUrl = buildWebSocketUrl();
+  const wsUrl = getBackendWebSocketBaseUrl();
   const wsEndpoint = sharedState.token ? `${wsUrl}/ws?token=${encodeURIComponent(sharedState.token)}` : `${wsUrl}/ws`;
   const socket = new WebSocket(wsEndpoint);
   sharedState.socket = socket;
@@ -184,16 +184,6 @@ function clearHeartbeat(): void {
   if (sharedState.heartbeatTimer !== undefined) {
     window.clearInterval(sharedState.heartbeatTimer);
     sharedState.heartbeatTimer = undefined;
-  }
-}
-
-function buildWebSocketUrl(): string {
-  try {
-    const parsed = new URL(backendHttpUrl);
-    const protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${parsed.host}`;
-  } catch {
-    return "ws://localhost:8000";
   }
 }
 

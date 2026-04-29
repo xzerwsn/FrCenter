@@ -52,6 +52,13 @@ import {
 import { listFeed, type FeedPublication } from "../api/feed";
 import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
+import {
+  getBackendHttpUrl,
+  getDefaultBackendHttpUrl,
+  resetBackendHttpUrl,
+  saveBackendHttpUrl,
+  subscribeBackendUrl,
+} from "../config/backend-url";
 import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
 import {
@@ -108,6 +115,7 @@ function App() {
   const [devCode, setDevCode] = React.useState<string | null>(null);
   const [themeId, setThemeId] = React.useState<string>(() => loadStoredThemeId());
   const [authBootstrapDone, setAuthBootstrapDone] = React.useState<boolean>(() => loadSession() !== null);
+  const [backendConfigVersion, setBackendConfigVersion] = React.useState(0);
   const previousSessionUserIdRef = React.useRef<string>("");
   const activeTheme = React.useMemo(() => SITE_THEMES.find((theme) => theme.id === themeId) ?? SITE_THEMES[0], [themeId]);
 
@@ -115,6 +123,8 @@ function App() {
     applyTheme(activeTheme);
     persistThemeId(activeTheme.id);
   }, [activeTheme]);
+
+  React.useEffect(() => subscribeBackendUrl(() => setBackendConfigVersion((value) => value + 1)), []);
 
   async function handleAuthenticated(_token: string) {
     const user = await getMe(_token);
@@ -258,6 +268,7 @@ function App() {
 
   return (
     <Dashboard
+      backendConfigVersion={backendConfigVersion}
       session={session}
       onLogout={handleLogout}
       onSessionUserUpdate={(user) => {
@@ -278,9 +289,81 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         <div className="brand auth-brand">FC</div>
         <h1>FrCenter</h1>
         <p>Вход в игровой E2EE-центр для друзей, чатов и новостей.</p>
+        <BackendUrlCard />
         {children}
       </section>
     </main>
+  );
+}
+
+function BackendUrlCard({
+  className = "",
+  onSaved,
+}: {
+  className?: string;
+  onSaved?: (nextUrl: string) => void;
+}) {
+  const [backendUrlInput, setBackendUrlInput] = React.useState(() => getBackendHttpUrl());
+  const [status, setStatus] = React.useState("");
+  const defaultBackendUrl = React.useMemo(() => getDefaultBackendHttpUrl(), []);
+
+  React.useEffect(() => {
+    return subscribeBackendUrl((nextUrl) => {
+      setBackendUrlInput(nextUrl);
+      setStatus("");
+    });
+  }, []);
+
+  function handleReset() {
+    const nextUrl = resetBackendHttpUrl();
+    setBackendUrlInput(nextUrl);
+    setStatus("Возвращен базовый backend URL");
+    onSaved?.(nextUrl);
+  }
+
+  function handleSave(event?: React.FormEvent) {
+    event?.preventDefault();
+    try {
+      const nextUrl = saveBackendHttpUrl(backendUrlInput);
+      setBackendUrlInput(nextUrl);
+      setStatus("Backend URL сохранен");
+      onSaved?.(nextUrl);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось сохранить backend URL");
+    }
+  }
+
+  return (
+    <section className={`backend-url-card ${className}`.trim()}>
+      <div className="settings-card-head backend-url-card-head">
+        <div className="settings-card-icon">
+          <Settings size={18} />
+        </div>
+        <div>
+          <h3>Backend URL</h3>
+          <p>Для desktop-сборки можно переключить сервер без пересборки `.exe`.</p>
+        </div>
+      </div>
+      <form className="inline-form stacked backend-url-form" onSubmit={handleSave}>
+        <input
+          onChange={(event) => setBackendUrlInput(event.target.value)}
+          placeholder="http://127.0.0.1:8000"
+          spellCheck={false}
+          type="url"
+          value={backendUrlInput}
+        />
+        <div className="backend-url-meta">
+          <span>По умолчанию: {defaultBackendUrl}</span>
+        </div>
+        <div className="backend-url-actions">
+          <button type="submit">Сохранить URL</button>
+          <button className="backend-url-reset" onClick={handleReset} type="button">
+            Сбросить
+          </button>
+        </div>
+      </form>
+      <p className={`form-status settings-status ${status ? "visible" : ""}`}>{status || " "}</p>
+    </section>
   );
 }
 
@@ -451,12 +534,14 @@ function ConfirmForm({
 }
 
 function Dashboard({
+  backendConfigVersion,
   session,
   onLogout,
   onSessionUserUpdate,
   themeId,
   onThemeChange,
 }: {
+  backendConfigVersion: number;
   session: Session;
   onLogout: () => void;
   onSessionUserUpdate: (user: CurrentUser) => void;
@@ -479,6 +564,7 @@ function Dashboard({
     declineIncomingFriendRequest,
     readNotification,
   } = useNotificationsStore({
+    backendConfigVersion,
     token: session.token,
     currentUser: session.user,
     onFriendsChanged: setFriends,
@@ -619,7 +705,13 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("chats") ? (
         <div style={{ display: section === "chats" ? "block" : "none" }}>
-          <ChatsPanel friends={friends} me={session.user} onOpenProfile={openUserProfile} token={session.token} />
+          <ChatsPanel
+            backendConfigVersion={backendConfigVersion}
+            friends={friends}
+            me={session.user}
+            onOpenProfile={openUserProfile}
+            token={session.token}
+          />
         </div>
         ) : null}
         {mountedSections.includes("friends") ? (
@@ -640,6 +732,7 @@ function Dashboard({
         {mountedSections.includes("settings") ? (
         <div style={{ display: section === "settings" ? "block" : "none" }}>
           <SettingsPanel
+            backendConfigVersion={backendConfigVersion}
             token={session.token}
             user={session.user}
             onSessionUserUpdate={onSessionUserUpdate}
@@ -1337,12 +1430,14 @@ function ClipsPanel({ friends, onOpenProfile }: { friends: UserPublic[]; onOpenP
 }
 
 function SettingsPanel({
+  backendConfigVersion,
   token,
   user,
   onSessionUserUpdate,
   themeId,
   onThemeChange,
 }: {
+  backendConfigVersion: number;
   token: string;
   user: CurrentUser;
   onSessionUserUpdate: (user: CurrentUser) => void;
@@ -1385,6 +1480,15 @@ function SettingsPanel({
         </div>
 
         <div className="settings-section-grid">
+          <BackendUrlCard
+            className="settings-panel-card"
+            onSaved={() => {
+              setSettingsStatus(
+                `Backend URL обновлен. Новые запросы уже пойдут на ${getBackendHttpUrl()}, realtime переподключен.`,
+              );
+            }}
+          />
+
           <section className="settings-panel-card">
             <div className="settings-card-head">
               <div className="settings-card-icon">
@@ -1634,11 +1738,13 @@ function FriendsPanel({
 }
 
 function ChatsPanel({
+  backendConfigVersion,
   token,
   me,
   friends,
   onOpenProfile,
 }: {
+  backendConfigVersion: number;
   token: string;
   me: CurrentUser;
   friends: UserPublic[];
@@ -1873,6 +1979,7 @@ function ChatsPanel({
   }, [selectedChatId, token]);
 
   useRealtimeSubscription(
+    backendConfigVersion,
     token,
     (event) => {
       if (event.type === "message.new") {
@@ -2463,6 +2570,7 @@ function ChatsPanel({
         kind: "media",
         media_id: media.media_id,
         media_url: media.media_url,
+        media_path: media.media_path,
         file_name: file.name,
         file_size: file.size,
         file_mime: file.type || "application/octet-stream",
@@ -2473,6 +2581,7 @@ function ChatsPanel({
     return {
       media_id: media.media_id,
       media_url: media.media_url,
+      media_path: media.media_path,
       file_name: file.name,
       file_size: file.size,
       file_mime: file.type || "application/octet-stream",
@@ -2495,13 +2604,28 @@ function ChatsPanel({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: false,
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          sampleRate: 48000,
+        },
+      });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
           ? "audio/ogg;codecs=opus"
           : "";
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const recorder = mimeType
+        ? new MediaRecorder(stream, {
+            audioBitsPerSecond: 128000,
+            mimeType,
+          })
+        : new MediaRecorder(stream, {
+            audioBitsPerSecond: 128000,
+          });
       voiceChunksRef.current = [];
       voiceStreamRef.current = stream;
       mediaRecorderRef.current = recorder;

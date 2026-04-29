@@ -3,6 +3,7 @@ import React from "react";
 import { connectRealtime, type RealtimeEvent } from "../api/realtime";
 
 export function useRealtimeSubscription(
+  connectionKey: number,
   token: string | undefined,
   onEvent: (event: RealtimeEvent) => void,
 ): void {
@@ -17,5 +18,5 @@ export function useRealtimeSubscription(
       eventRef.current(event);
     });
     return () => socket.close();
-  }, [token]);
+  }, [connectionKey, token]);
 }

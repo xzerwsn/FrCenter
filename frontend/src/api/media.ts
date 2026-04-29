@@ -1,6 +1,9 @@
+import { getBackendHttpUrl } from "../config/backend-url";
+
 export type MediaUploadResponse = {
   media_id: string;
   media_url: string;
+  media_path: string;
   size: number;
   mime_type: string;
   filename: string;
@@ -14,13 +17,12 @@ export type PublicMediaUploadResponse = {
   filename: string;
 };
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
-
 export async function uploadEncryptedMedia(
   token: string,
   chatId: string,
   encryptedFile: File,
 ): Promise<MediaUploadResponse> {
+  const backendUrl = getBackendHttpUrl();
   const formData = new FormData();
   formData.append("chat_id", chatId);
   formData.append("encrypted_file", encryptedFile);
@@ -57,6 +59,7 @@ export async function uploadPublicMedia(
   file: File,
   category: string,
 ): Promise<PublicMediaUploadResponse> {
+  const backendUrl = getBackendHttpUrl();
   const formData = new FormData();
   formData.append("file", file);
   formData.append("category", category);

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -23,6 +24,7 @@ router = APIRouter()
 class MediaUploadResponse(BaseModel):
     media_id: str
     media_url: str
+    media_path: str
     size: int
     mime_type: str
     filename: str
@@ -59,6 +61,7 @@ async def upload_media(
     if size == 0:
         storage.delete(storage_key)
         raise HTTPException(status_code=400, detail="Encrypted file is empty")
+    encrypted_bytes = await asyncio.to_thread(storage.resolve_path(storage_key).read_bytes)
 
     media = MediaAsset(
         id=media_id,
@@ -69,7 +72,7 @@ async def upload_media(
         size=size,
         storage_backend=settings.media_storage_backend,
         storage_key=storage_key,
-        encrypted_bytes=None,
+        encrypted_bytes=encrypted_bytes,
     )
     db.add(media)
     try:
@@ -82,6 +85,7 @@ async def upload_media(
     return MediaUploadResponse(
         media_id=media.id,
         media_url=f"{settings.backend_url}/api/media/{media.id}",
+        media_path=f"/api/media/{media.id}",
         size=media.size,
         mime_type="application/octet-stream",
         filename=media.filename,
@@ -162,7 +166,9 @@ async def download_media(
         try:
             file_path = storage.resolve_path(media.storage_key)
         except MissingMediaObject as exc:
-            raise HTTPException(status_code=404, detail="Media object missing") from exc
+            if media.encrypted_bytes is None:
+                raise HTTPException(status_code=404, detail="Media object missing") from exc
+            return Response(content=media.encrypted_bytes, media_type="application/octet-stream", headers=headers)
         return FileResponse(
             file_path,
             media_type="application/octet-stream",

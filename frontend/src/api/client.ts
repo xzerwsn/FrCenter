@@ -1,4 +1,4 @@
-﻿const backendUrl = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8000";
+import { getBackendHttpUrl } from "../config/backend-url";
 
 type ApiOptions = {
   token?: string;
@@ -17,6 +17,7 @@ export class ApiError extends Error {
 }
 
 export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  const backendUrl = getBackendHttpUrl();
   const response = await safeFetch(`${backendUrl}${path}`, {
     credentials: "include",
     headers: createHeaders(options.token, false),
@@ -25,6 +26,7 @@ export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise
 }
 
 export async function apiPost<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+  const backendUrl = getBackendHttpUrl();
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "POST",
     credentials: "include",
@@ -35,6 +37,7 @@ export async function apiPost<T>(path: string, body: unknown, options: ApiOption
 }
 
 export async function apiDelete<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+  const backendUrl = getBackendHttpUrl();
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "DELETE",
     credentials: "include",
@@ -45,6 +48,7 @@ export async function apiDelete<T>(path: string, body: unknown, options: ApiOpti
 }
 
 export async function apiPatch<T>(path: string, body: unknown, options: ApiOptions = {}): Promise<T> {
+  const backendUrl = getBackendHttpUrl();
   const response = await safeFetch(`${backendUrl}${path}`, {
     method: "PATCH",
     credentials: "include",
@@ -110,6 +114,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 async function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const backendUrl = getBackendHttpUrl();
   try {
     return await fetch(input, init);
   } catch {

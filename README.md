@@ -38,6 +38,7 @@ scripts/   Local helper scripts
 See [docs/LOCAL_BACKEND.md](docs/LOCAL_BACKEND.md) for the first auth API run with PostgreSQL and Alembic migrations.
 For testing with a friend outside your local network on Windows, see [docs/WINDOWS_REMOTE_CHAT_TEST.md](docs/WINDOWS_REMOTE_CHAT_TEST.md).
 For Render deployment via GitHub, see [docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md).
+For Tauri desktop packaging on Windows and backend URL runtime configuration, see [docs/DESKTOP_WINDOWS.md](docs/DESKTOP_WINDOWS.md).
 
 ## One-command local start (Windows)
 

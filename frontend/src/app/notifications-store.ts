@@ -21,10 +21,12 @@ import { useRealtimeSubscription } from "./realtime-store";
 export const DEFAULT_NOTIFICATION_SOUND_URL = "https://www.myinstants.com/media/sounds/hell_AJWSn3e.mp3";
 
 export function useNotificationsStore({
+  backendConfigVersion,
   token,
   currentUser,
   onFriendsChanged,
 }: {
+  backendConfigVersion: number;
   token: string;
   currentUser: CurrentUser;
   onFriendsChanged: (friends: UserPublic[]) => void;
@@ -107,7 +109,7 @@ export function useNotificationsStore({
     [currentUser.id, playNotificationSound, refreshFriendRequests],
   );
 
-  useRealtimeSubscription(token, handleRealtimeEvent);
+  useRealtimeSubscription(backendConfigVersion, token, handleRealtimeEvent);
 
   const openNotifications = React.useCallback(async () => {
     setNotificationsOpen(true);

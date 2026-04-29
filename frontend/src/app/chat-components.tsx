@@ -4,11 +4,13 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import type { Message } from "../api/chats";
 import type { UserPublic } from "../api/users";
+import { getBackendHttpUrl } from "../config/backend-url";
 import { decryptBytesWithSharedKey } from "../crypto/messages";
 
 export type MediaPayloadFile = {
   media_id: string;
   media_url: string;
+  media_path?: string;
   file_name: string;
   file_size: number;
   file_mime: string;
@@ -48,7 +50,7 @@ export const MediaMessageView = React.memo(function MediaMessageView({
         const chatKey = await ensureChatKey(chatId);
         const nextFiles: Array<{ payload: MediaPayloadFile; url: string }> = [];
         for (const payload of mediaPayloadFiles) {
-          const response = await fetch(payload.media_url, {
+          const response = await fetch(resolveMediaFetchUrl(payload), {
             credentials: "include",
             headers: token ? { Authorization: `Bearer ${token}` } : undefined,
           });
@@ -340,11 +342,37 @@ function normalizeMediaPayloadFile(payload: Partial<MediaPayloadFile> | null | u
   return {
     media_id: payload.media_id ?? "",
     media_url: payload.media_url,
+    media_path: typeof payload.media_path === "string" ? payload.media_path : undefined,
     file_name: payload.file_name,
     file_size: typeof payload.file_size === "number" ? payload.file_size : 0,
     file_mime: payload.file_mime ?? "application/octet-stream",
     file_nonce: payload.file_nonce ?? "",
   };
+}
+
+function resolveMediaFetchUrl(payload: MediaPayloadFile): string {
+  const backendUrl = getBackendHttpUrl();
+  if (payload.media_path) {
+    return joinBackendUrl(backendUrl, payload.media_path);
+  }
+  if (payload.media_id) {
+    return `${backendUrl}/api/media/${payload.media_id}`;
+  }
+  try {
+    const parsed = new URL(payload.media_url);
+    return joinBackendUrl(backendUrl, parsed.pathname);
+  } catch {
+    if (payload.media_url.startsWith("/")) {
+      return joinBackendUrl(backendUrl, payload.media_url);
+    }
+    return payload.media_url;
+  }
+}
+
+function joinBackendUrl(backendUrl: string, path: string): string {
+  const trimmedBase = backendUrl.replace(/\/+$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${trimmedBase}${normalizedPath}`;
 }
 
 const VoiceMessageCard = React.memo(function VoiceMessageCard({
