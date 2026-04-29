@@ -73,5 +73,14 @@ class Settings(BaseSettings):
     def auth_cookie_secure(self) -> bool:
         return self.app_env != "development"
 
+    @property
+    def effective_auth_cookie_samesite(self) -> str:
+        value = (self.auth_cookie_samesite or "lax").strip().lower()
+        if self.app_env != "development":
+            return "none"
+        if value not in {"lax", "strict", "none"}:
+            return "lax"
+        return value
+
 
 settings = Settings()

@@ -32,7 +32,7 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         value=token,
         httponly=True,
         secure=settings.auth_cookie_secure,
-        samesite=settings.auth_cookie_samesite,
+        samesite=settings.effective_auth_cookie_samesite,
         max_age=settings.access_token_expire_minutes * 60,
         path="/",
     )
@@ -43,7 +43,7 @@ def _clear_auth_cookie(response: Response) -> None:
         key=settings.auth_cookie_name,
         httponly=True,
         secure=settings.auth_cookie_secure,
-        samesite=settings.auth_cookie_samesite,
+        samesite=settings.effective_auth_cookie_samesite,
         path="/",
     )
 
