@@ -756,6 +756,46 @@ a:hover {
   margin-top: 0;
 }
 
+.games-provider-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.games-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-input) 86%, transparent);
+}
+
+.games-summary-row strong,
+.games-summary-row span {
+  display: block;
+}
+
+.games-summary-row span {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.games-stats-list {
+  display: grid;
+  gap: 10px;
+}
+
+.games-stat-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-surface-strong) 88%, transparent);
+}
+
 .friends-main-card,
 .settings-main-card {
   min-width: 0;

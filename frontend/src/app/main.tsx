@@ -51,14 +51,9 @@ import {
 } from "../api/friends";
 import { listFeed, type FeedPublication } from "../api/feed";
 import {
-  clearGameActivity,
-  connectGameAccount,
   disconnectGameAccount,
   getGamesOverview,
-  setGameActivity,
-  type GameAccount,
-  type GameActivity,
-  type GamePlatform,
+  type GameProviderOverview,
 } from "../api/games";
 import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
@@ -1395,40 +1390,43 @@ function GamesPanel({
   onOpenProfile: (user: UserPublic) => void;
   onSessionUserUpdate: (user: CurrentUser) => void;
 }) {
-  const [accounts, setAccounts] = React.useState<GameAccount[]>([]);
-  const [activities, setActivities] = React.useState<GameActivity[]>([]);
+  const [steam, setSteam] = React.useState<GameProviderOverview | null>(null);
+  const [riot, setRiot] = React.useState<GameProviderOverview | null>(null);
   const [status, setStatus] = React.useState("");
-  const [steamId, setSteamId] = React.useState("");
-  const [steamName, setSteamName] = React.useState("");
-  const [steamGame, setSteamGame] = React.useState("");
-  const [riotId, setRiotId] = React.useState("");
-  const [riotName, setRiotName] = React.useState("");
-  const [riotGame, setRiotGame] = React.useState("");
 
   React.useEffect(() => {
     void loadOverview();
   }, [token]);
 
   React.useEffect(() => {
-    const steam = accounts.find((item) => item.platform === "steam");
-    const riot = accounts.find((item) => item.platform === "riot");
-    setSteamId(steam?.external_user_id ?? "");
-    setSteamName(steam?.display_name ?? "");
-    setRiotId(riot?.external_user_id ?? "");
-    setRiotName(riot?.display_name ?? "");
-  }, [accounts]);
-
-  React.useEffect(() => {
-    const steam = activities.find((item) => item.platform === "steam");
-    const riot = activities.find((item) => item.platform === "riot");
-    setSteamGame(steam?.game_name ?? "");
-    setRiotGame(riot?.game_name ?? "");
-  }, [activities]);
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const gamesStatus = params.get("games");
+    const gamesMessage = params.get("games_message");
+    if (!gamesStatus) {
+      return;
+    }
+    const mappedStatus =
+      gamesStatus === "steam_connected"
+        ? "Steam подключен"
+        : gamesStatus === "riot_connected"
+          ? "Riot / VALORANT подключен"
+          : gamesMessage || "Не удалось завершить подключение";
+    setStatus(mappedStatus);
+    params.delete("games");
+    params.delete("games_message");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+    void Promise.all([loadOverview(), refreshCurrentUser()]);
+  }, [token]);
 
   async function loadOverview() {
     const overview = await getGamesOverview(token);
-    setAccounts(overview.accounts);
-    setActivities(overview.active_activities);
+    setSteam(overview.steam);
+    setRiot(overview.riot);
   }
 
   async function refreshCurrentUser() {
@@ -1436,66 +1434,22 @@ function GamesPanel({
     onSessionUserUpdate(updated);
   }
 
-  async function handleConnect(platform: GamePlatform) {
-    const externalUserId = platform === "steam" ? steamId.trim() : riotId.trim();
-    const displayName = platform === "steam" ? steamName.trim() : riotName.trim();
-    if (!externalUserId) {
-      setStatus(`Укажи ID аккаунта ${platform === "steam" ? "Steam" : "Riot"}`);
+  function handleConnect(provider: GameProviderOverview | null, title: string) {
+    if (!provider?.enabled || !provider.connect_url) {
+      setStatus(provider?.status_hint || `${title} пока не настроен на backend`);
       return;
     }
-    setStatus(`Подключаем ${platform === "steam" ? "Steam" : "Riot"}...`);
-    try {
-      await connectGameAccount(token, {
-        platform,
-        external_user_id: externalUserId,
-        display_name: displayName || null,
-      });
-      await loadOverview();
-      setStatus(`${platform === "steam" ? "Steam" : "Riot"} подключен`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось подключить интеграцию");
-    }
+    window.location.href = provider.connect_url;
   }
 
-  async function handleDisconnect(platform: GamePlatform) {
-    setStatus(`Отключаем ${platform === "steam" ? "Steam" : "Riot"}...`);
+  async function handleDisconnect(platform: "steam" | "riot", title: string) {
+    setStatus(`Отключаем ${title}...`);
     try {
       await disconnectGameAccount(token, platform);
       await Promise.all([loadOverview(), refreshCurrentUser()]);
-      setStatus(`${platform === "steam" ? "Steam" : "Riot"} отключен`);
+      setStatus(`${title} отключен`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Не удалось отключить интеграцию");
-    }
-  }
-
-  async function handleSetActivity(platform: GamePlatform) {
-    const gameName = platform === "steam" ? steamGame.trim() : riotGame.trim();
-    if (!gameName) {
-      setStatus("Укажи название игры");
-      return;
-    }
-    setStatus(`Обновляем статус ${platform === "steam" ? "Steam" : "Riot"}...`);
-    try {
-      await setGameActivity(token, {
-        platform,
-        game_name: gameName,
-        activity_type: "playing",
-      });
-      await Promise.all([loadOverview(), refreshCurrentUser()]);
-      setStatus("Игровой статус обновлен");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось обновить игровой статус");
-    }
-  }
-
-  async function handleClearActivity(platform: GamePlatform) {
-    setStatus(`Снимаем статус ${platform === "steam" ? "Steam" : "Riot"}...`);
-    try {
-      await clearGameActivity(token, platform);
-      await Promise.all([loadOverview(), refreshCurrentUser()]);
-      setStatus("Игровой статус очищен");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось очистить игровой статус");
     }
   }
 
@@ -1510,33 +1464,15 @@ function GamesPanel({
 
         <div className="games-platform-grid">
           <GameIntegrationCard
-            account={accounts.find((item) => item.platform === "steam") ?? null}
-            activity={activities.find((item) => item.platform === "steam") ?? null}
-            displayName={steamName}
-            externalUserId={steamId}
-            gameName={steamGame}
-            onConnect={() => void handleConnect("steam")}
-            onDisconnect={() => void handleDisconnect("steam")}
-            onDisplayNameChange={setSteamName}
-            onExternalUserIdChange={setSteamId}
-            onGameNameChange={setSteamGame}
-            onSetActivity={() => void handleSetActivity("steam")}
-            onClearActivity={() => void handleClearActivity("steam")}
+            provider={steam}
+            onConnect={() => handleConnect(steam, "Steam")}
+            onDisconnect={() => void handleDisconnect("steam", "Steam")}
             platform="steam"
           />
           <GameIntegrationCard
-            account={accounts.find((item) => item.platform === "riot") ?? null}
-            activity={activities.find((item) => item.platform === "riot") ?? null}
-            displayName={riotName}
-            externalUserId={riotId}
-            gameName={riotGame}
-            onConnect={() => void handleConnect("riot")}
-            onDisconnect={() => void handleDisconnect("riot")}
-            onDisplayNameChange={setRiotName}
-            onExternalUserIdChange={setRiotId}
-            onGameNameChange={setRiotGame}
-            onSetActivity={() => void handleSetActivity("riot")}
-            onClearActivity={() => void handleClearActivity("riot")}
+            provider={riot}
+            onConnect={() => handleConnect(riot, "Riot")}
+            onDisconnect={() => void handleDisconnect("riot", "Riot")}
             platform="riot"
           />
         </div>
@@ -1573,35 +1509,21 @@ function GamesPanel({
 
 function GameIntegrationCard({
   platform,
-  account,
-  activity,
-  externalUserId,
-  displayName,
-  gameName,
-  onExternalUserIdChange,
-  onDisplayNameChange,
-  onGameNameChange,
+  provider,
   onConnect,
   onDisconnect,
-  onSetActivity,
-  onClearActivity,
 }: {
-  platform: GamePlatform;
-  account: GameAccount | null;
-  activity: GameActivity | null;
-  externalUserId: string;
-  displayName: string;
-  gameName: string;
-  onExternalUserIdChange: (value: string) => void;
-  onDisplayNameChange: (value: string) => void;
-  onGameNameChange: (value: string) => void;
+  platform: "steam" | "riot";
+  provider: GameProviderOverview | null;
   onConnect: () => void;
   onDisconnect: () => void;
-  onSetActivity: () => void;
-  onClearActivity: () => void;
 }) {
   const title = platform === "steam" ? "Steam" : "Riot Games";
-  const hint = platform === "steam" ? "SteamID / vanity name" : "Riot ID / puuid";
+  const account = provider?.account ?? null;
+  const steamStats = provider?.steam_stats ?? null;
+  const valorantStats = provider?.valorant_stats ?? null;
+  const isEnabled = provider?.enabled ?? false;
+  const statusHint = provider?.status_hint ?? "";
 
   return (
     <section className="games-platform-card">
@@ -1611,27 +1533,24 @@ function GameIntegrationCard({
         </div>
         <div>
           <h3>{title}</h3>
-          <p>Подключи профиль и выстави текущую игру вручную, пока живые API только подключаются.</p>
+          <p>
+            {platform === "steam"
+              ? "Подключение идет через Steam OpenID, затем мы подтягиваем профиль и недавно сыгранные игры."
+              : "Подключение идет через Riot RSO, затем мы подтягиваем VALORANT account и последние матчи."}
+          </p>
         </div>
       </div>
       <div className="settings-toggle-list">
-        <label className="settings-toggle-row settings-input-row">
+        <div className="settings-toggle-row">
           <div>
-            <strong>ID аккаунта</strong>
-            <span>{hint}</span>
+            <strong>Статус подключения</strong>
+            <span>{account ? "Аккаунт подключен" : isEnabled ? "Можно подключать" : statusHint || "Провайдер отключен"}</span>
           </div>
-          <input onChange={(event) => onExternalUserIdChange(event.target.value)} value={externalUserId} />
-        </label>
-        <label className="settings-toggle-row settings-input-row">
-          <div>
-            <strong>Отображаемое имя</strong>
-            <span>Можно оставить пустым, тогда будет локальное имя профиля.</span>
-          </div>
-          <input onChange={(event) => onDisplayNameChange(event.target.value)} value={displayName} />
-        </label>
+          <span>{account ? "online" : "idle"}</span>
+        </div>
         <div className="games-card-actions">
           <button className="inline-action" onClick={onConnect} type="button">
-            {account ? "Обновить аккаунт" : "Подключить"}
+            {account ? `Переподключить ${title}` : `Подключить ${title}`}
           </button>
           {account ? (
             <button className="inline-action secondary" onClick={onDisconnect} type="button">
@@ -1639,23 +1558,60 @@ function GameIntegrationCard({
             </button>
           ) : null}
         </div>
-        <label className="settings-toggle-row settings-input-row">
-          <div>
-            <strong>Текущая игра</strong>
-            <span>{activity ? `Активно: ${activity.game_name}` : "Пока нет активного статуса"}</span>
+        {account ? (
+          <div className="games-provider-summary">
+            <div className="games-summary-row">
+              <strong>Аккаунт</strong>
+              <span>{account.display_name || account.external_user_id}</span>
+            </div>
+            {platform === "steam" && steamStats ? (
+              <>
+                <div className="games-summary-row">
+                  <strong>Сейчас играет</strong>
+                  <span>{steamStats.current_game || "Не в игре"}</span>
+                </div>
+                <div className="games-summary-row">
+                  <strong>Профиль</strong>
+                  <span>{steamStats.persona_name || "Steam profile"}</span>
+                </div>
+                <div className="games-stats-list">
+                  {steamStats.recent_games.map((game) => (
+                    <div className="games-stat-chip" key={`${game.app_id}-${game.name}`}>
+                      <strong>{game.name}</strong>
+                      <span>{game.playtime_hours} ч</span>
+                    </div>
+                  ))}
+                  {steamStats.recent_games.length === 0 ? <div className="friends-empty-state">Недавно сыгранных Steam-игр пока нет.</div> : null}
+                </div>
+              </>
+            ) : null}
+            {platform === "riot" && valorantStats ? (
+              <>
+                <div className="games-summary-row">
+                  <strong>VALORANT</strong>
+                  <span>
+                    {valorantStats.game_name && valorantStats.tag_line
+                      ? `${valorantStats.game_name}#${valorantStats.tag_line}`
+                      : valorantStats.puuid || "Аккаунт привязан"}
+                  </span>
+                </div>
+                <div className="games-summary-row">
+                  <strong>Последние матчи</strong>
+                  <span>{valorantStats.recent_match_ids.length}</span>
+                </div>
+                <div className="games-stats-list">
+                  {valorantStats.recent_match_ids.map((matchId) => (
+                    <div className="games-stat-chip" key={matchId}>
+                      <strong>Match</strong>
+                      <span>{matchId.slice(0, 12)}...</span>
+                    </div>
+                  ))}
+                  {valorantStats.recent_match_ids.length === 0 ? <div className="friends-empty-state">Riot вернул аккаунт, но история матчей пока пустая.</div> : null}
+                </div>
+              </>
+            ) : null}
           </div>
-          <input onChange={(event) => onGameNameChange(event.target.value)} value={gameName} />
-        </label>
-        <div className="games-card-actions">
-          <button className="inline-action" onClick={onSetActivity} type="button">
-            Поставить статус
-          </button>
-          {activity ? (
-            <button className="inline-action secondary" onClick={onClearActivity} type="button">
-              Очистить статус
-            </button>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     </section>
   );
