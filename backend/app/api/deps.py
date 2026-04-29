@@ -16,34 +16,31 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    token = None
+    cookie_token = request.cookies.get(settings.auth_cookie_name)
+    bearer_token = None
     if credentials is not None and credentials.scheme.lower() == "bearer":
-        token = credentials.credentials
-    else:
-        token = request.cookies.get(settings.auth_cookie_name)
+        bearer_token = credentials.credentials
 
-    if not token:
+    tokens = [token for token in (cookie_token, bearer_token) if token]
+    if not tokens:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Требуется авторизация",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user_id = decode_access_token(token)
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный или истекший токен",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    for token in tokens:
+        user_id = decode_access_token(token)
+        if user_id is None:
+            continue
 
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Пользователь не найден",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user is not None:
+            return user
 
-    return user
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Неверный или истекший токен",
+        headers={"WWW-Authenticate": "Bearer"},
+    )

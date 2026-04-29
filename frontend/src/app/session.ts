@@ -33,21 +33,20 @@ export function saveSession(session: Session): void {
 }
 
 export function loadSession(): Session | null {
-  const legacyToken = readLegacyToken();
   let userJson: string | null = null;
   try {
     userJson = localStorage.getItem(USER_KEY);
   } catch {
-    return legacyToken ? { token: legacyToken, user: normalizeStoredUser({}) } : null;
+    return null;
   }
   if (!userJson) {
-    return legacyToken ? { token: legacyToken, user: normalizeStoredUser({}) } : null;
+    return null;
   }
 
   try {
-    return { token: legacyToken, user: normalizeStoredUser(JSON.parse(userJson)) };
+    return { token: "", user: normalizeStoredUser(JSON.parse(userJson)) };
   } catch {
-    return { token: legacyToken, user: normalizeStoredUser({}) };
+    return { token: "", user: normalizeStoredUser({}) };
   }
 }
 
@@ -167,13 +166,4 @@ function trimText(value: string | null | undefined, maxLength: number): string |
     return null;
   }
   return trimmed.slice(0, maxLength);
-}
-
-function readLegacyToken(): string {
-  try {
-    const token = localStorage.getItem(LEGACY_TOKEN_KEY);
-    return typeof token === "string" ? token : "";
-  } catch {
-    return "";
-  }
 }

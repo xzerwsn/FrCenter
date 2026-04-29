@@ -19,7 +19,7 @@ export class ApiError extends Error {
 export async function apiGet<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const response = await safeFetch(`${backendUrl}${path}`, {
     credentials: "include",
-    headers: createHeaders(options.token),
+    headers: createHeaders(options.token, false),
   });
   return parseResponse<T>(response);
 }
@@ -54,10 +54,12 @@ export async function apiPatch<T>(path: string, body: unknown, options: ApiOptio
   return parseResponse<T>(response);
 }
 
-function createHeaders(token?: string): HeadersInit {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+function createHeaders(token?: string, includeJsonContentType = true): HeadersInit {
+  const headers: Record<string, string> = {};
+
+  if (includeJsonContentType) {
+    headers["Content-Type"] = "application/json";
+  }
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;

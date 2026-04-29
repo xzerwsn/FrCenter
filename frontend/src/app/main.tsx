@@ -106,9 +106,9 @@ function App() {
     persistThemeId(activeTheme.id);
   }, [activeTheme]);
 
-  async function handleAuthenticated(token: string) {
-    const user = await getMe(token);
-    const nextSession = { token, user };
+  async function handleAuthenticated(_token: string) {
+    const user = await getMe();
+    const nextSession = { token: "", user };
     saveSession(nextSession);
     setSession(nextSession);
     setAuthBootstrapDone(true);
@@ -193,12 +193,12 @@ function App() {
       return;
     }
     let active = true;
-    void getMe(session.token)
+    void getMe()
       .then((user) => {
         if (!active) {
           return;
         }
-        const nextSession = { token: session.token, user };
+        const nextSession = { token: "", user };
         saveSession(nextSession);
         setSession(nextSession);
       })
@@ -1677,6 +1677,7 @@ function ChatsPanel({
     const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
     const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
     const chatMessagePageInfoRef = React.useRef<Record<string, { id: string | null; createdAt: string | null; hasMore: boolean }>>({});
+    const chatPrefetchInFlightRef = React.useRef<Record<string, boolean>>({});
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
   const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
@@ -2002,23 +2003,6 @@ function ChatsPanel({
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
-  React.useEffect(() => {
-    const chatsToPrefetch = orderedChats.slice(0, 8).map((chat) => chat.id);
-    const schedulePrefetch = () => {
-      for (const chatId of chatsToPrefetch) {
-        if (!chatMessagesCacheRef.current[chatId]) {
-          void prefetchChatMessages(chatId);
-        }
-      }
-    };
-    if ("requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(schedulePrefetch, { timeout: 1200 });
-      return () => window.cancelIdleCallback(idleId);
-    }
-    const timeoutId = setTimeout(schedulePrefetch, 120);
-    return () => clearTimeout(timeoutId);
-  }, [orderedChats]);
-
   async function reloadChats() {
     setChatsLoading(true);
     try {
@@ -2027,7 +2011,12 @@ function ChatsPanel({
       const hotChat = [...response.chats].sort(
         (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
       )[0];
-      if (hotChat && !chatMessagesCacheRef.current[hotChat.id]) {
+      if (
+        hotChat &&
+        !selectedChatIdRef.current &&
+        !chatMessagesCacheRef.current[hotChat.id] &&
+        !chatPrefetchInFlightRef.current[hotChat.id]
+      ) {
         void prefetchChatMessages(hotChat.id);
       }
     } finally {
@@ -2184,9 +2173,10 @@ function ChatsPanel({
   }
 
   async function prefetchChatMessages(chatId: string) {
-    if (chatMessagesCacheRef.current[chatId]) {
+    if (chatMessagesCacheRef.current[chatId] || chatPrefetchInFlightRef.current[chatId]) {
       return;
     }
+    chatPrefetchInFlightRef.current[chatId] = true;
     try {
       const response = await listChatMessages(token, chatId, { limit: 40 });
       chatMessagesCacheRef.current[chatId] = response.messages;
@@ -2198,6 +2188,8 @@ function ChatsPanel({
       await decodeMessagesForChat(chatId, response.messages);
     } catch {
       // keep prefetch silent
+    } finally {
+      delete chatPrefetchInFlightRef.current[chatId];
     }
   }
 
