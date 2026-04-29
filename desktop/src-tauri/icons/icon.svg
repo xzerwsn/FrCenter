@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="FC icon">
+  <defs>
+    <linearGradient id="fc-fill" x1="16%" y1="12%" x2="82%" y2="86%">
+      <stop offset="0%" stop-color="#fff7ef" />
+      <stop offset="52%" stop-color="#efd5bf" />
+      <stop offset="100%" stop-color="#cd8f67" />
+    </linearGradient>
+    <linearGradient id="fc-stroke" x1="24%" y1="0%" x2="84%" y2="100%">
+      <stop offset="0%" stop-color="#fff4ea" />
+      <stop offset="100%" stop-color="#b46a42" />
+    </linearGradient>
+    <filter id="fc-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#965632" flood-opacity="0.34" />
+    </filter>
+  </defs>
+  <g filter="url(#fc-shadow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path
+      d="M74 44h110M74 44v168M74 126h88"
+      stroke="url(#fc-stroke)"
+      stroke-width="28"
+    />
+    <path
+      d="M192 72c-12-16-31-26-52-26-37 0-68 31-68 82s31 82 68 82c21 0 40-10 52-26"
+      stroke="url(#fc-fill)"
+      stroke-width="28"
+    />
+  </g>
+</svg>

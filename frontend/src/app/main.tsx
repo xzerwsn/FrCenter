@@ -11,6 +11,7 @@ import {
   LogOut,
   Mic,
   MessageCircle,
+  Minus,
   MoreHorizontal,
   Palette,
   Paperclip,
@@ -241,51 +242,57 @@ function App() {
 
   if (!session && !authBootstrapDone) {
     return (
-      <AuthShell>
-        <p className="form-status">Проверяем сессию...</p>
-      </AuthShell>
+      <DesktopWindowFrame>
+        <AuthShell>
+          <p className="form-status">Проверяем сессию...</p>
+        </AuthShell>
+      </DesktopWindowFrame>
     );
   }
 
   if (!session) {
     return (
-      <AuthShell>
-        {authMode === "login" ? <LoginForm onLogin={handleAuthenticated} onSwitch={() => setAuthMode("register")} /> : null}
-        {authMode === "register" ? (
-          <RegisterForm
-            onRegistered={(email, code) => {
-              setPendingEmail(email);
-              setDevCode(code);
-              setAuthMode("confirm");
-            }}
-            onSwitch={() => setAuthMode("login")}
-          />
-        ) : null}
-        {authMode === "confirm" ? (
-          <ConfirmForm
-            defaultEmail={pendingEmail}
-            devCode={devCode}
-            onConfirmed={() => setAuthMode("login")}
-            onSwitch={() => setAuthMode("login")}
-          />
-        ) : null}
-      </AuthShell>
+      <DesktopWindowFrame>
+        <AuthShell>
+          {authMode === "login" ? <LoginForm onLogin={handleAuthenticated} onSwitch={() => setAuthMode("register")} /> : null}
+          {authMode === "register" ? (
+            <RegisterForm
+              onRegistered={(email, code) => {
+                setPendingEmail(email);
+                setDevCode(code);
+                setAuthMode("confirm");
+              }}
+              onSwitch={() => setAuthMode("login")}
+            />
+          ) : null}
+          {authMode === "confirm" ? (
+            <ConfirmForm
+              defaultEmail={pendingEmail}
+              devCode={devCode}
+              onConfirmed={() => setAuthMode("login")}
+              onSwitch={() => setAuthMode("login")}
+            />
+          ) : null}
+        </AuthShell>
+      </DesktopWindowFrame>
     );
   }
 
   return (
-    <Dashboard
-      backendConfigVersion={backendConfigVersion}
-      session={session}
-      onLogout={handleLogout}
-      onSessionUserUpdate={(user) => {
-        const nextSession = { ...session, user };
-        setSession(nextSession);
-        saveSession(nextSession);
-      }}
-      themeId={activeTheme.id}
-      onThemeChange={setThemeId}
-    />
+    <DesktopWindowFrame>
+      <Dashboard
+        backendConfigVersion={backendConfigVersion}
+        session={session}
+        onLogout={handleLogout}
+        onSessionUserUpdate={(user) => {
+          const nextSession = { ...session, user };
+          setSession(nextSession);
+          saveSession(nextSession);
+        }}
+        themeId={activeTheme.id}
+        onThemeChange={setThemeId}
+      />
+    </DesktopWindowFrame>
   );
 }
 
@@ -300,6 +307,65 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         {children}
       </section>
     </main>
+  );
+}
+
+type TauriWindowInternals = Window & {
+  __TAURI_INTERNALS__?: {
+    invoke?: <Result = unknown>(command: string, payload?: Record<string, unknown>) => Promise<Result>;
+  };
+};
+
+function DesktopWindowFrame({ children }: { children: React.ReactNode }) {
+  const desktop = useIsTauriDesktop();
+
+  if (!desktop) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div className="desktop-frame">
+      <div className="desktop-window">
+        <DesktopTitlebar />
+        <div className="desktop-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function DesktopTitlebar() {
+  async function handleWindowAction(command: "minimize_window" | "toggle_maximize_window" | "close_window") {
+    await invokeTauriWindowCommand(command);
+  }
+
+  return (
+    <header className="desktop-titlebar" data-tauri-drag-region onDoubleClick={() => void handleWindowAction("toggle_maximize_window")}>
+      <div className="desktop-titlebar-brand" data-tauri-drag-region>
+        <span className="desktop-titlebar-mark" aria-hidden="true">
+          FC
+        </span>
+        <div className="desktop-titlebar-copy" data-tauri-drag-region>
+          <strong>FrCenter</strong>
+          <span>Desktop client</span>
+        </div>
+      </div>
+      <div className="desktop-window-controls">
+        <button aria-label="Свернуть окно" className="desktop-window-button" onClick={() => void handleWindowAction("minimize_window")} type="button">
+          <Minus size={16} />
+        </button>
+        <button
+          aria-label="Развернуть или восстановить окно"
+          className="desktop-window-button"
+          onClick={() => void handleWindowAction("toggle_maximize_window")}
+          type="button"
+        >
+          <Square size={14} />
+        </button>
+        <button aria-label="Закрыть окно" className="desktop-window-button danger" onClick={() => void handleWindowAction("close_window")} type="button">
+          <X size={16} />
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -3760,6 +3826,32 @@ function ChatMessagesSkeleton() {
 
 function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
+function useIsTauriDesktop(): boolean {
+  const [desktop, setDesktop] = React.useState(false);
+
+  React.useEffect(() => {
+    setDesktop(hasTauriWindowApi());
+  }, []);
+
+  return desktop;
+}
+
+function hasTauriWindowApi(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return typeof (window as TauriWindowInternals).__TAURI_INTERNALS__?.invoke === "function";
+}
+
+async function invokeTauriWindowCommand<Result = unknown>(
+  command: "minimize_window" | "toggle_maximize_window" | "close_window",
+): Promise<Result | undefined> {
+  if (!hasTauriWindowApi()) {
+    return undefined;
+  }
+  return (window as TauriWindowInternals).__TAURI_INTERNALS__!.invoke?.(command);
 }
 
 function readStoredStringList(key: string): string[] {

@@ -62,6 +62,144 @@ body {
   overflow: hidden;
 }
 
+.desktop-frame {
+  width: 100vw;
+  height: 100vh;
+  padding: 12px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--color-accent-2) 20%, transparent), transparent 28%),
+    radial-gradient(circle at bottom right, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 32%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-surface-deep) 96%, black 4%), color-mix(in srgb, var(--color-bg) 90%, black 10%));
+}
+
+.desktop-window {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 56%, rgb(255 255 255 / 14%));
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-strong) 98%, black 2%), color-mix(in srgb, var(--color-surface) 96%, black 4%));
+  box-shadow:
+    0 22px 54px rgb(0 0 0 / 28%),
+    0 0 0 1px rgb(255 255 255 / 4%),
+    inset 0 1px 0 rgb(255 255 255 / 7%);
+}
+
+.desktop-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 56px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 22%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-strong) 92%, white 3%), color-mix(in srgb, var(--color-surface-deep) 90%, black 10%));
+  user-select: none;
+}
+
+.desktop-titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.desktop-titlebar-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  color: var(--color-button-text);
+  background:
+    radial-gradient(circle at 28% 18%, rgb(255 255 255 / 70%), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-accent) 86%, white 14%), color-mix(in srgb, var(--color-accent-2) 82%, var(--color-accent) 18%));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 36%),
+    0 10px 24px color-mix(in srgb, var(--color-accent) 22%, transparent);
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.desktop-titlebar-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.desktop-titlebar-copy strong,
+.desktop-titlebar-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-titlebar-copy strong {
+  color: var(--color-button-text);
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+}
+
+.desktop-titlebar-copy span {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+}
+
+.desktop-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.desktop-window-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 18%, transparent);
+  border-radius: 12px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-input) 84%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+  cursor: pointer;
+}
+
+.desktop-window-button:hover {
+  color: var(--color-button-text);
+  background: color-mix(in srgb, var(--color-accent) 72%, var(--color-input) 28%);
+}
+
+.desktop-window-button.danger:hover {
+  background: linear-gradient(145deg, #b54d56, #d66c76);
+}
+
+.desktop-body {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.desktop-body > .shell,
+.desktop-body > .auth-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.desktop-body > .auth-shell {
+  min-height: 100%;
+  padding: 24px;
+}
+
+.desktop-body > .shell {
+  border-radius: 0 0 26px 26px;
+}
+
 html,
 body,
 #root {

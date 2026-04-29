@@ -17,6 +17,8 @@
         "height": 780,
         "minWidth": 900,
         "minHeight": 620,
+        "decorations": false,
+        "shadow": true,
         "useHttpsScheme": false
       }
     ]
@@ -24,6 +26,9 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
