@@ -1,6 +1,10 @@
 /// <reference lib="webworker" />
 
-import { createSharedMessageKey, decryptTextWithSharedKey } from "./messages";
+import { base64ToBytes, bytesToBase64, textToBytes } from "./encoding";
+import {
+  createSharedMessageKey,
+  decryptTextWithSharedKey,
+} from "./messages";
 
 type WorkerRequest =
   | {
@@ -35,6 +39,22 @@ type WorkerRequest =
     }
   | {
       id: number;
+      type: "encrypt-text";
+      payload: {
+        plaintext: string;
+        sharedKeyBase64: string;
+      };
+    }
+  | {
+      id: number;
+      type: "encrypt-bytes";
+      payload: {
+        plaintextBuffer: ArrayBuffer;
+        sharedKeyBase64: string;
+      };
+    }
+  | {
+      id: number;
       type: "clear-session";
     };
 
@@ -45,6 +65,8 @@ type WorkerResponse =
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const derivedKeyCache = new Map<string, Promise<CryptoKey>>();
+let sodiumModulePromise: Promise<typeof import("libsodium-wrappers-sumo")> | null = null;
+const sharedKeyCache = new Map<string, Uint8Array>();
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const request = event.data;
@@ -121,8 +143,44 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         respond({ id: request.id, ok: true, result });
         return;
       }
+      case "encrypt-text": {
+        const sodium = await getSodium();
+        const key = getSharedKeyBytes(request.payload.sharedKeyBase64);
+        const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+        const ciphertext = sodium.crypto_secretbox_easy(textToBytes(request.payload.plaintext), nonce, key);
+        respond({
+          id: request.id,
+          ok: true,
+          result: {
+            ciphertext: bytesToBase64(ciphertext),
+            nonce: bytesToBase64(nonce),
+          },
+        });
+        return;
+      }
+      case "encrypt-bytes": {
+        const sodium = await getSodium();
+        const key = getSharedKeyBytes(request.payload.sharedKeyBase64);
+        const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+        const ciphertext = sodium.crypto_secretbox_easy(new Uint8Array(request.payload.plaintextBuffer), nonce, key);
+        const ciphertextBuffer = toArrayBuffer(ciphertext);
+        respondWithTransfer(
+          {
+            id: request.id,
+            ok: true,
+            result: {
+              ciphertextBuffer,
+              nonce: bytesToBase64(nonce),
+            },
+          },
+          [ciphertextBuffer],
+        );
+        return;
+      }
       case "clear-session": {
         derivedKeyCache.clear();
+        sharedKeyCache.clear();
+        sodiumModulePromise = null;
         respond({ id: request.id, ok: true, result: true });
         return;
       }
@@ -177,21 +235,26 @@ function respond(response: WorkerResponse) {
   self.postMessage(response);
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
+function respondWithTransfer(response: WorkerResponse, transfer: Transferable[]) {
+  self.postMessage(response, transfer);
 }
 
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+async function getSodium() {
+  sodiumModulePromise ??= import("libsodium-wrappers-sumo");
+  const sodiumModule = await sodiumModulePromise;
+  const sodium = (("default" in sodiumModule ? sodiumModule.default : sodiumModule) ?? sodiumModule) as typeof import("libsodium-wrappers-sumo");
+  await sodium.ready;
+  return sodium;
+}
+
+function getSharedKeyBytes(sharedKeyBase64: string): Uint8Array {
+  const existing = sharedKeyCache.get(sharedKeyBase64);
+  if (existing) {
+    return existing;
   }
-  return bytes;
+  const decoded = base64ToBytes(sharedKeyBase64);
+  sharedKeyCache.set(sharedKeyBase64, decoded);
+  return decoded;
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

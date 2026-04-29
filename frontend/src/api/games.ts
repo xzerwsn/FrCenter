@@ -1,6 +1,6 @@
-import { apiDelete, apiGet } from "./client";
+export type GamePlatform = "steam";
 
-export type GamePlatform = "steam" | "riot";
+import { apiDelete, apiGet } from "./client";
 
 export type GameAccount = {
   id: string;
@@ -25,27 +25,17 @@ export type SteamStats = {
   recent_games: SteamRecentGame[];
 };
 
-export type ValorantStats = {
-  game_name: string | null;
-  tag_line: string | null;
-  puuid: string | null;
-  recent_match_ids: string[];
-};
-
-export type GameProviderOverview = {
+export type SteamOverview = {
   enabled: boolean;
   connected: boolean;
   connect_url: string | null;
   account: GameAccount | null;
   steam_stats?: SteamStats | null;
-  valorant_stats?: ValorantStats | null;
-  game: string | null;
   status_hint: string | null;
 };
 
 export type GamesOverviewResponse = {
-  steam: GameProviderOverview;
-  riot: GameProviderOverview;
+  steam: SteamOverview;
 };
 
 export async function getGamesOverview(token: string): Promise<GamesOverviewResponse> {

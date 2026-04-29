@@ -49,16 +49,6 @@ class Settings(BaseSettings):
     steam_web_api_key: str = ""
     steam_web_api_base_url: str = "https://api.steampowered.com"
     steam_openid_login_url: str = "https://steamcommunity.com/openid/login"
-    riot_client_id: str = ""
-    riot_client_secret: str = ""
-    riot_authorize_url: str = "https://auth.riotgames.com/authorize"
-    riot_token_url: str = "https://auth.riotgames.com/token"
-    riot_account_api_urls_csv: str = (
-        "https://europe.api.riotgames.com/riot/account/v1/accounts/me,"
-        "https://americas.api.riotgames.com/riot/account/v1/accounts/me,"
-        "https://asia.api.riotgames.com/riot/account/v1/accounts/me"
-    )
-    riot_val_match_regions_csv: str = "europe,americas,asia"
     auth_cookie_name: str = "frcenter_session"
     auth_cookie_samesite: str = "lax"
     access_token_expire_minutes: int = 60 * 24 * 7
@@ -106,24 +96,8 @@ class Settings(BaseSettings):
         return bool(self.steam_web_api_key.strip())
 
     @property
-    def riot_enabled(self) -> bool:
-        return bool(self.riot_client_id.strip() and self.riot_client_secret.strip())
-
-    @property
     def steam_callback_url(self) -> str:
         return f"{self.backend_url.rstrip('/')}/api/games/steam/callback"
-
-    @property
-    def riot_callback_url(self) -> str:
-        return f"{self.backend_url.rstrip('/')}/api/games/riot/callback"
-
-    @property
-    def riot_account_api_urls(self) -> list[str]:
-        return [item.strip() for item in self.riot_account_api_urls_csv.split(",") if item.strip()]
-
-    @property
-    def riot_val_match_regions(self) -> list[str]:
-        return [item.strip() for item in self.riot_val_match_regions_csv.split(",") if item.strip()]
 
 
 settings = Settings()

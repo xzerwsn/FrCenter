@@ -53,7 +53,7 @@ import { listFeed, type FeedPublication } from "../api/feed";
 import {
   disconnectGameAccount,
   getGamesOverview,
-  type GameProviderOverview,
+  type SteamOverview,
 } from "../api/games";
 import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
@@ -64,12 +64,13 @@ import {
   saveBackendHttpUrl,
   subscribeBackendUrl,
 } from "../config/backend-url";
-import { encryptBytesForSharedKey, encryptTextForSharedKey } from "../crypto/messages";
 import { bytesToBase64 } from "../crypto/encoding";
 import {
   decryptCacheEntriesInWorker,
   decryptMessagesInWorker,
   encryptCacheEntriesInWorker,
+  encryptBytesForSharedKeyInWorker,
+  encryptTextForSharedKeyInWorker,
   generateSharedKeyInWorker,
   resetCryptoWorkerSession,
 } from "../crypto/worker-client";
@@ -98,6 +99,7 @@ const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
+const chatKeyCache = new Map<string, Promise<string>>();
 
 type MessageContextMenuState = {
   message: Message;
@@ -1390,8 +1392,7 @@ function GamesPanel({
   onOpenProfile: (user: UserPublic) => void;
   onSessionUserUpdate: (user: CurrentUser) => void;
 }) {
-  const [steam, setSteam] = React.useState<GameProviderOverview | null>(null);
-  const [riot, setRiot] = React.useState<GameProviderOverview | null>(null);
+  const [steam, setSteam] = React.useState<SteamOverview | null>(null);
   const [status, setStatus] = React.useState("");
 
   React.useEffect(() => {
@@ -1411,9 +1412,7 @@ function GamesPanel({
     const mappedStatus =
       gamesStatus === "steam_connected"
         ? "Steam подключен"
-        : gamesStatus === "riot_connected"
-          ? "Riot / VALORANT подключен"
-          : gamesMessage || "Не удалось завершить подключение";
+        : gamesMessage || "Не удалось завершить подключение";
     setStatus(mappedStatus);
     params.delete("games");
     params.delete("games_message");
@@ -1426,7 +1425,6 @@ function GamesPanel({
   async function loadOverview() {
     const overview = await getGamesOverview(token);
     setSteam(overview.steam);
-    setRiot(overview.riot);
   }
 
   async function refreshCurrentUser() {
@@ -1434,7 +1432,7 @@ function GamesPanel({
     onSessionUserUpdate(updated);
   }
 
-  function handleConnect(provider: GameProviderOverview | null, title: string) {
+  function handleConnect(provider: SteamOverview | null, title: string) {
     if (!provider?.enabled || !provider.connect_url) {
       setStatus(provider?.status_hint || `${title} пока не настроен на backend`);
       return;
@@ -1442,10 +1440,10 @@ function GamesPanel({
     window.location.href = provider.connect_url;
   }
 
-  async function handleDisconnect(platform: "steam" | "riot", title: string) {
+  async function handleDisconnect(title: string) {
     setStatus(`Отключаем ${title}...`);
     try {
-      await disconnectGameAccount(token, platform);
+      await disconnectGameAccount(token, "steam");
       await Promise.all([loadOverview(), refreshCurrentUser()]);
       setStatus(`${title} отключен`);
     } catch (error) {
@@ -1459,21 +1457,14 @@ function GamesPanel({
         <div className="panel-hero panel-hero-games">
           <span>Game sync</span>
           <h2>Игровые интеграции</h2>
-          <p>Подключай Steam и Riot, чтобы держать игровые профили и текущие статусы в одном месте.</p>
+          <p>Подключай Steam, чтобы держать игровой профиль и текущий статус в одном месте.</p>
         </div>
 
         <div className="games-platform-grid">
           <GameIntegrationCard
             provider={steam}
             onConnect={() => handleConnect(steam, "Steam")}
-            onDisconnect={() => void handleDisconnect("steam", "Steam")}
-            platform="steam"
-          />
-          <GameIntegrationCard
-            provider={riot}
-            onConnect={() => handleConnect(riot, "Riot")}
-            onDisconnect={() => void handleDisconnect("riot", "Riot")}
-            platform="riot"
+            onDisconnect={() => void handleDisconnect("Steam")}
           />
         </div>
       </div>
@@ -1486,7 +1477,7 @@ function GamesPanel({
             </div>
             <div>
               <h3>Активность друзей</h3>
-              <p>Список строится по общему `current_game`, поэтому Steam и Riot сразу видны в профилях и друзьях.</p>
+              <p>Список строится по общему `current_game`, поэтому Steam-статус сразу виден в профилях и друзьях.</p>
             </div>
           </div>
           <div className="result-list">
@@ -1508,20 +1499,17 @@ function GamesPanel({
 }
 
 function GameIntegrationCard({
-  platform,
   provider,
   onConnect,
   onDisconnect,
 }: {
-  platform: "steam" | "riot";
-  provider: GameProviderOverview | null;
+  provider: SteamOverview | null;
   onConnect: () => void;
   onDisconnect: () => void;
 }) {
-  const title = platform === "steam" ? "Steam" : "Riot Games";
+  const title = "Steam";
   const account = provider?.account ?? null;
   const steamStats = provider?.steam_stats ?? null;
-  const valorantStats = provider?.valorant_stats ?? null;
   const isEnabled = provider?.enabled ?? false;
   const statusHint = provider?.status_hint ?? "";
 
@@ -1533,11 +1521,7 @@ function GameIntegrationCard({
         </div>
         <div>
           <h3>{title}</h3>
-          <p>
-            {platform === "steam"
-              ? "Подключение идет через Steam OpenID, затем мы подтягиваем профиль и недавно сыгранные игры."
-              : "Подключение идет через Riot RSO, затем мы подтягиваем VALORANT account и последние матчи."}
-          </p>
+          <p>Подключение идет через Steam OpenID, затем мы подтягиваем профиль и недавно сыгранные игры.</p>
         </div>
       </div>
       <div className="settings-toggle-list">
@@ -1564,7 +1548,7 @@ function GameIntegrationCard({
               <strong>Аккаунт</strong>
               <span>{account.display_name || account.external_user_id}</span>
             </div>
-            {platform === "steam" && steamStats ? (
+            {steamStats ? (
               <>
                 <div className="games-summary-row">
                   <strong>Сейчас играет</strong>
@@ -1582,31 +1566,6 @@ function GameIntegrationCard({
                     </div>
                   ))}
                   {steamStats.recent_games.length === 0 ? <div className="friends-empty-state">Недавно сыгранных Steam-игр пока нет.</div> : null}
-                </div>
-              </>
-            ) : null}
-            {platform === "riot" && valorantStats ? (
-              <>
-                <div className="games-summary-row">
-                  <strong>VALORANT</strong>
-                  <span>
-                    {valorantStats.game_name && valorantStats.tag_line
-                      ? `${valorantStats.game_name}#${valorantStats.tag_line}`
-                      : valorantStats.puuid || "Аккаунт привязан"}
-                  </span>
-                </div>
-                <div className="games-summary-row">
-                  <strong>Последние матчи</strong>
-                  <span>{valorantStats.recent_match_ids.length}</span>
-                </div>
-                <div className="games-stats-list">
-                  {valorantStats.recent_match_ids.map((matchId) => (
-                    <div className="games-stat-chip" key={matchId}>
-                      <strong>Match</strong>
-                      <span>{matchId.slice(0, 12)}...</span>
-                    </div>
-                  ))}
-                  {valorantStats.recent_match_ids.length === 0 ? <div className="friends-empty-state">Riot вернул аккаунт, но история матчей пока пустая.</div> : null}
                 </div>
               </>
             ) : null}
@@ -2629,7 +2588,7 @@ function ChatsPanel({
     }
     try {
       const key = await ensureChatKey(selectedChatId);
-      const encrypted = await encryptTextForSharedKey(trimmed, key);
+      const encrypted = await encryptTextForSharedKeyInWorker(trimmed, key);
       await updateChatMessage(token, selectedChatId, message.id, {
         ciphertext: encrypted.ciphertext,
         nonce: encrypted.nonce,
@@ -2754,7 +2713,7 @@ function ChatsPanel({
       throw new Error("Чат не выбран");
     }
     const key = await ensureChatKey(selectedChatId);
-    const encrypted = await encryptTextForSharedKey(text, key);
+    const encrypted = await encryptTextForSharedKeyInWorker(text, key);
     return sendChatMessage(token, selectedChatId, {
       ciphertext: encrypted.ciphertext,
       nonce: encrypted.nonce,
@@ -2768,25 +2727,12 @@ function ChatsPanel({
     }
     const chatKey = await ensureChatKey(selectedChatId);
     const fileBytes = new Uint8Array(await file.arrayBuffer());
-    const encryptedFile = await encryptBytesForSharedKey(fileBytes, chatKey);
+    const encryptedFile = await encryptBytesForSharedKeyInWorker(fileBytes, chatKey);
     const encryptedBuffer = new ArrayBuffer(encryptedFile.ciphertextBytes.byteLength);
     new Uint8Array(encryptedBuffer).set(encryptedFile.ciphertextBytes);
     const encryptedBlob = new Blob([encryptedBuffer], { type: "application/octet-stream" });
     const encryptedFileObject = new File([encryptedBlob], `${file.name}.enc`, { type: "application/octet-stream" });
     const media = await uploadEncryptedMedia(token, selectedChatId, encryptedFileObject);
-    const encryptedPayload = await encryptTextForSharedKey(
-      JSON.stringify({
-        kind: "media",
-        media_id: media.media_id,
-        media_url: media.media_url,
-        media_path: media.media_path,
-        file_name: file.name,
-        file_size: file.size,
-        file_mime: file.type || "application/octet-stream",
-        file_nonce: encryptedFile.nonce,
-      }),
-      chatKey,
-    );
     return {
       media_id: media.media_id,
       media_url: media.media_url,
@@ -2937,7 +2883,7 @@ function ChatsPanel({
           setStatus(`Шифруем и отправляем вложения ${index + 1}/${batches.length}...`);
           const uploadedFiles = await Promise.all(batch.map((item) => uploadEncryptedAttachment(item.file)));
           const chatKey = await ensureChatKey(selectedChatId);
-          const encryptedPayload = await encryptTextForSharedKey(
+          const encryptedPayload = await encryptTextForSharedKeyInWorker(
             JSON.stringify({
               kind: "media_batch",
               files: uploadedFiles,
@@ -3967,12 +3913,19 @@ function getChatListPreview(
 }
 
 async function ensureChatKey(chatId: string): Promise<string> {
-  const storageKey = `${CHAT_KEY_PREFIX}${chatId}`;
-  const derived = await deriveDeterministicChatKey(chatId);
-  if (localStorage.getItem(storageKey) !== derived) {
-    localStorage.setItem(storageKey, derived);
+  const cached = chatKeyCache.get(chatId);
+  if (cached) {
+    return cached;
   }
-  return derived;
+  const pending = deriveDeterministicChatKey(chatId).then((derived) => {
+    const storageKey = `${CHAT_KEY_PREFIX}${chatId}`;
+    if (localStorage.getItem(storageKey) !== derived) {
+      localStorage.setItem(storageKey, derived);
+    }
+    return derived;
+  });
+  chatKeyCache.set(chatId, pending);
+  return pending;
 }
 
 async function deriveDeterministicChatKey(chatId: string): Promise<string> {

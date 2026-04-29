@@ -9,6 +9,16 @@ type CacheCipherItem = {
   iv: string;
 };
 
+type SharedKeyTextCipher = {
+  ciphertext: string;
+  nonce: string;
+};
+
+type SharedKeyBinaryCipher = {
+  ciphertextBytes: Uint8Array;
+  nonce: string;
+};
+
 let worker: Worker | null = null;
 let requestId = 0;
 const pendingRequests = new Map<number, PendingRequest>();
@@ -33,11 +43,11 @@ function getWorker(): Worker {
   return worker;
 }
 
-function callWorker<Result>(type: string, payload?: unknown): Promise<Result> {
+function callWorker<Result>(type: string, payload?: unknown, transfer?: Transferable[]): Promise<Result> {
   const id = ++requestId;
   return new Promise<Result>((resolve, reject) => {
     pendingRequests.set(id, { resolve, reject });
-    getWorker().postMessage({ id, type, payload });
+    getWorker().postMessage({ id, type, payload }, transfer ?? []);
   });
 }
 
@@ -66,6 +76,31 @@ export async function decryptCacheEntriesInWorker(
 
 export async function generateSharedKeyInWorker(): Promise<string> {
   return callWorker("generate-shared-key");
+}
+
+export async function encryptTextForSharedKeyInWorker(
+  plaintext: string,
+  sharedKeyBase64: string,
+): Promise<SharedKeyTextCipher> {
+  return callWorker("encrypt-text", { plaintext, sharedKeyBase64 });
+}
+
+export async function encryptBytesForSharedKeyInWorker(
+  plaintextBytes: Uint8Array,
+  sharedKeyBase64: string,
+): Promise<SharedKeyBinaryCipher> {
+  const transferable = plaintextBytes.buffer.slice(
+    plaintextBytes.byteOffset,
+    plaintextBytes.byteOffset + plaintextBytes.byteLength,
+  );
+  const result = await callWorker<{
+    ciphertextBuffer: ArrayBuffer;
+    nonce: string;
+  }>("encrypt-bytes", { plaintextBuffer: transferable, sharedKeyBase64 }, [transferable]);
+  return {
+    ciphertextBytes: new Uint8Array(result.ciphertextBuffer),
+    nonce: result.nonce,
+  };
 }
 
 export async function resetCryptoWorkerSession(): Promise<void> {

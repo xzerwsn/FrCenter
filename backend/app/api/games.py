@@ -14,9 +14,7 @@ from app.services.game_service import (
     GameIntegrationError,
     ProviderNotConfigured,
     build_games_overview,
-    build_riot_connect_url,
     build_steam_connect_url,
-    connect_riot_account,
     connect_steam_account,
     disconnect_account,
     verify_steam_openid,
@@ -73,59 +71,12 @@ async def steam_callback(
     return _redirect_frontend("steam_connected")
 
 
-@router.get("/riot/connect")
-async def riot_connect(current_user: User = Depends(get_current_user)) -> RedirectResponse:
-    if not settings.riot_enabled:
-        raise HTTPException(status_code=503, detail="Riot RSO is not configured")
-    state = create_oauth_state(current_user.id, "riot")
-    return RedirectResponse(build_riot_connect_url(state=state), status_code=status.HTTP_302_FOUND)
-
-
-@router.get("/riot/callback")
-async def riot_callback(
-    code: str | None = Query(default=None),
-    state: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    if error:
-        return _redirect_frontend("riot_error", f"Riot вернул ошибку: {error}")
-    if not code or not state:
-        return _redirect_frontend("riot_error", "Riot не вернул code/state")
-
-    decoded = decode_oauth_state(state)
-    if decoded is None:
-        return _redirect_frontend("riot_error", "Некорректный state")
-    user_id, provider = decoded
-    if provider != "riot":
-        return _redirect_frontend("riot_error", "State не относится к Riot")
-
-    user = await db.get(User, user_id)
-    if user is None:
-        return _redirect_frontend("riot_error", "Пользователь не найден")
-
-    try:
-        await connect_riot_account(db, user, code)
-    except ProviderNotConfigured as exc:
-        return _redirect_frontend("riot_error", str(exc))
-    except GameIntegrationError as exc:
-        return _redirect_frontend("riot_error", str(exc))
-    except Exception:
-        return _redirect_frontend("riot_error", "Не удалось подключить Riot / VALORANT")
-
-    return _redirect_frontend("riot_connected")
-
-
-@router.delete("/accounts/{platform}", status_code=status.HTTP_204_NO_CONTENT)
-async def disconnect_game_account(
-    platform: str,
+@router.delete("/accounts/steam", status_code=status.HTTP_204_NO_CONTENT)
+async def disconnect_steam_account(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    try:
-        await disconnect_account(db, current_user, platform)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await disconnect_account(db, current_user, "steam")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
