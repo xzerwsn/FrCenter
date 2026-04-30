@@ -26,14 +26,22 @@ async def feed(
     _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[FeedPublicationResponse]:
-    result = await db.execute(select(User).where(User.profile_photos.is_not(None)))
-    users = result.scalars().all()
+    result = await db.execute(
+        select(
+            User.id,
+            User.username,
+            User.display_name,
+            User.avatar_url,
+            User.profile_photos,
+        ).where(User.profile_photos.is_not(None))
+    )
+    rows = result.all()
     publications: list[FeedPublicationResponse] = []
-    for user in users:
-        if not user.profile_photos:
+    for user_id, username, display_name, avatar_url, profile_photos in rows:
+        if not profile_photos:
             continue
         try:
-            photos = json.loads(user.profile_photos)
+            photos = json.loads(profile_photos)
         except json.JSONDecodeError:
             continue
         if not isinstance(photos, list):
@@ -42,10 +50,10 @@ async def feed(
             if isinstance(item, str) and item:
                 publications.append(
                     FeedPublicationResponse(
-                        author_id=user.id,
-                        author_username=user.username,
-                        author_display_name=user.display_name,
-                        author_avatar_url=user.avatar_url,
+                        author_id=user_id,
+                        author_username=username,
+                        author_display_name=display_name,
+                        author_avatar_url=avatar_url,
                         caption=None,
                         image_url=item,
                     )
@@ -58,10 +66,10 @@ async def feed(
                 caption = item.get("caption")
                 publications.append(
                     FeedPublicationResponse(
-                        author_id=user.id,
-                        author_username=user.username,
-                        author_display_name=user.display_name,
-                        author_avatar_url=user.avatar_url,
+                        author_id=user_id,
+                        author_username=username,
+                        author_display_name=display_name,
+                        author_avatar_url=avatar_url,
                         caption=caption if isinstance(caption, str) else None,
                         image_url=url,
                     )

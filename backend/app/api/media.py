@@ -61,8 +61,6 @@ async def upload_media(
     if size == 0:
         storage.delete(storage_key)
         raise HTTPException(status_code=400, detail="Encrypted file is empty")
-    encrypted_bytes = await asyncio.to_thread(storage.resolve_path(storage_key).read_bytes)
-
     media = MediaAsset(
         id=media_id,
         chat_id=chat_id,
@@ -72,7 +70,6 @@ async def upload_media(
         size=size,
         storage_backend=settings.media_storage_backend,
         storage_key=storage_key,
-        encrypted_bytes=encrypted_bytes,
     )
     db.add(media)
     try:
