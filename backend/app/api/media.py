@@ -102,12 +102,13 @@ async def upload_public_media(
     storage = get_media_storage()
     asset_id = str(uuid4())
     try:
+        normalized_category = (category or "").strip().lower()
         storage_key, size = await storage.store_public_upload(
             asset_id,
             file,
             category=category,
             max_size_bytes=10 * 1024 * 1024,
-            require_image=True,
+            require_image=not normalized_category.startswith("notification-sound"),
         )
     except Exception as exc:
         detail = exc.args[0] if exc.args else "Failed to store public asset"

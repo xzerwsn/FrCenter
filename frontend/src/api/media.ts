@@ -1,3 +1,4 @@
+import { safeFetch } from "./client";
 import { getBackendHttpUrl } from "../config/backend-url";
 
 export type MediaUploadResponse = {
@@ -27,7 +28,7 @@ export async function uploadEncryptedMedia(
   formData.append("chat_id", chatId);
   formData.append("encrypted_file", encryptedFile);
 
-  const response = await fetch(`${backendUrl}/api/media/upload`, {
+  const response = await safeFetch(`${backendUrl}/api/media/upload`, {
     method: "POST",
     credentials: "include",
     headers: token
@@ -64,7 +65,7 @@ export async function uploadPublicMedia(
   formData.append("file", file);
   formData.append("category", category);
 
-  const response = await fetch(`${backendUrl}/api/media/public-upload`, {
+  const response = await safeFetch(`${backendUrl}/api/media/public-upload`, {
     method: "POST",
     credentials: "include",
     headers: token

@@ -27,6 +27,7 @@
     "active": true,
     "targets": ["nsis"],
     "icon": [
+      "icons/icon.png",
       "icons/icon.ico"
     ],
     "windows": {

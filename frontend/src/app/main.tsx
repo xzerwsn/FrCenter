@@ -59,10 +59,7 @@ import {
 import { uploadEncryptedMedia, uploadPublicMedia } from "../api/media";
 import { getMe, updateMe, type CurrentUser, type ProfilePhoto, type UserPublic } from "../api/users";
 import {
-  getBackendHttpUrl,
   getDefaultBackendHttpUrl,
-  resetBackendHttpUrl,
-  saveBackendHttpUrl,
   subscribeBackendUrl,
 } from "../config/backend-url";
 import { bytesToBase64 } from "../crypto/encoding";
@@ -92,9 +89,12 @@ import { useRealtimeSubscription } from "./realtime-store";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import { applyTheme, loadStoredThemeId, persistThemeId, SITE_THEMES, type SiteTheme } from "./settings-store";
 import "../styles/globals.css";
+import frcenterIcon from "../assets/frcenter-icon.png";
+import frcenterLoaderReference from "../assets/frcenter-loader-reference-v2.png";
 
 type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "games" | "clips" | "settings";
+const REQUIRED_BOOTSTRAP_SECTIONS: DashboardSection[] = ["home", "friends", "chats"];
 
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
@@ -116,7 +116,16 @@ type ComposerAttachment = {
   durationSeconds: number | null;
 };
 
-function App() {
+const LOADING_STAGES = [
+  "Syncing shell visuals",
+  "Restoring encrypted session",
+  "Initializing network node",
+  "Opening FrCenter",
+];
+
+type SectionReadyCallback = () => void;
+
+function App({ onReady }: { onReady?: () => void }) {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
   const [authMode, setAuthMode] = React.useState<AuthMode>("login");
   const [pendingEmail, setPendingEmail] = React.useState("");
@@ -240,6 +249,12 @@ function App() {
     };
   }, [session?.token]);
 
+  React.useEffect(() => {
+    if (!session && authBootstrapDone) {
+      onReady?.();
+    }
+  }, [authBootstrapDone, onReady, session]);
+
   if (!session && !authBootstrapDone) {
     return (
       <DesktopWindowFrame>
@@ -282,6 +297,7 @@ function App() {
     <DesktopWindowFrame>
       <Dashboard
         backendConfigVersion={backendConfigVersion}
+        onBootstrapReady={onReady}
         session={session}
         onLogout={handleLogout}
         onSessionUserUpdate={(user) => {
@@ -296,6 +312,110 @@ function App() {
   );
 }
 
+function BootstrapApp() {
+  const [appReady, setAppReady] = React.useState(false);
+  const [overlayVisible, setOverlayVisible] = React.useState(true);
+  const [overlayClosing, setOverlayClosing] = React.useState(false);
+  const [progress, setProgress] = React.useState(12);
+  const [stageIndex, setStageIndex] = React.useState(0);
+  const bootStartedAt = React.useRef(Date.now());
+
+  React.useEffect(() => {
+    if (!overlayVisible) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const elapsed = Date.now() - bootStartedAt.current;
+      const pendingCap = Math.min(92, 12 + elapsed / 28);
+      const target = appReady ? 100 : pendingCap;
+
+      setProgress((current) => {
+        if (current >= target) {
+          return current;
+        }
+        const step = appReady ? 7.5 : Math.max(1.2, (target - current) * 0.22);
+        return Math.min(target, current + step);
+      });
+
+      setStageIndex((current) => {
+        if (appReady) {
+          return LOADING_STAGES.length - 1;
+        }
+        const nextIndex = Math.min(LOADING_STAGES.length - 2, Math.floor(elapsed / 520));
+        return Math.max(current, nextIndex);
+      });
+    }, 80);
+
+    return () => window.clearInterval(intervalId);
+  }, [appReady, overlayVisible]);
+
+  React.useEffect(() => {
+    if (!appReady || !overlayVisible) {
+      return;
+    }
+
+    const elapsed = Date.now() - bootStartedAt.current;
+    const remainingVisibleMs = Math.max(0, 1500 - elapsed);
+    const completeTimer = window.setTimeout(() => {
+      setProgress(100);
+      setStageIndex(LOADING_STAGES.length - 1);
+      setOverlayClosing(true);
+      const hideTimer = window.setTimeout(() => setOverlayVisible(false), 560);
+      return () => window.clearTimeout(hideTimer);
+    }, remainingVisibleMs);
+
+    return () => window.clearTimeout(completeTimer);
+  }, [appReady, overlayVisible]);
+
+  return (
+    <>
+      <App onReady={() => setAppReady(true)} />
+      {overlayVisible ? (
+        <LoadingScreen
+          closing={overlayClosing}
+          progress={progress}
+          stage={LOADING_STAGES[stageIndex] ?? LOADING_STAGES[LOADING_STAGES.length - 1]}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function LoadingScreen({
+  closing,
+  progress,
+  stage,
+}: {
+  closing: boolean;
+  progress: number;
+  stage: string;
+}) {
+  const progressValue = Math.max(0, Math.min(100, Math.round(progress)));
+  return (
+    <div aria-hidden="true" className={`boot-overlay ${closing ? "is-closing" : ""}`}>
+      <div className="boot-scene">
+        <img alt="" className="boot-scene-background" draggable="false" src={frcenterLoaderReference} />
+        <div className="boot-shell-card">
+          <div className="boot-art-frame">
+            <img alt="FrCenter loading art" className="boot-reference-art" draggable="false" src={frcenterLoaderReference} />
+          </div>
+          <div className="boot-progress-panel">
+            <div className="boot-progress-header">
+              <span>Loading</span>
+              <strong>{progressValue}%</strong>
+            </div>
+            <div className="boot-progress-track">
+              <div className="boot-progress-fill" style={{ width: `${progressValue}%` }} />
+            </div>
+            <p>{stage}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <main className="auth-shell">
@@ -303,7 +423,6 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         <div className="brand auth-brand">FC</div>
         <h1>FrCenter</h1>
         <p>Вход в игровой E2EE-центр для друзей, чатов и новостей.</p>
-        <BackendUrlCard />
         {children}
       </section>
     </main>
@@ -342,7 +461,7 @@ function DesktopTitlebar() {
     <header className="desktop-titlebar" data-tauri-drag-region onDoubleClick={() => void handleWindowAction("toggle_maximize_window")}>
       <div className="desktop-titlebar-brand" data-tauri-drag-region>
         <span className="desktop-titlebar-mark" aria-hidden="true">
-          FC
+          <img alt="" draggable="false" src={frcenterIcon} />
         </span>
         <div className="desktop-titlebar-copy" data-tauri-drag-region>
           <strong>FrCenter</strong>
@@ -369,42 +488,12 @@ function DesktopTitlebar() {
   );
 }
 
-function BackendUrlCard({
+function BackendEndpointCard({
   className = "",
-  onSaved,
 }: {
   className?: string;
-  onSaved?: (nextUrl: string) => void;
 }) {
-  const [backendUrlInput, setBackendUrlInput] = React.useState(() => getBackendHttpUrl());
-  const [status, setStatus] = React.useState("");
   const defaultBackendUrl = React.useMemo(() => getDefaultBackendHttpUrl(), []);
-
-  React.useEffect(() => {
-    return subscribeBackendUrl((nextUrl) => {
-      setBackendUrlInput(nextUrl);
-      setStatus("");
-    });
-  }, []);
-
-  function handleReset() {
-    const nextUrl = resetBackendHttpUrl();
-    setBackendUrlInput(nextUrl);
-    setStatus("Возвращен базовый backend URL");
-    onSaved?.(nextUrl);
-  }
-
-  function handleSave(event?: React.FormEvent) {
-    event?.preventDefault();
-    try {
-      const nextUrl = saveBackendHttpUrl(backendUrlInput);
-      setBackendUrlInput(nextUrl);
-      setStatus("Backend URL сохранен");
-      onSaved?.(nextUrl);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Не удалось сохранить backend URL");
-    }
-  }
 
   return (
     <section className={`backend-url-card ${className}`.trim()}>
@@ -413,29 +502,14 @@ function BackendUrlCard({
           <Settings size={18} />
         </div>
         <div>
-          <h3>Backend URL</h3>
-          <p>Для desktop-сборки можно переключить сервер без пересборки `.exe`.</p>
+          <h3>Backend endpoint</h3>
+          <p>Desktop и web используют фиксированный production backend без ручной настройки при первом запуске.</p>
         </div>
       </div>
-      <form className="inline-form stacked backend-url-form" onSubmit={handleSave}>
-        <input
-          onChange={(event) => setBackendUrlInput(event.target.value)}
-          placeholder="http://127.0.0.1:8000"
-          spellCheck={false}
-          type="url"
-          value={backendUrlInput}
-        />
-        <div className="backend-url-meta">
-          <span>По умолчанию: {defaultBackendUrl}</span>
-        </div>
-        <div className="backend-url-actions">
-          <button type="submit">Сохранить URL</button>
-          <button className="backend-url-reset" onClick={handleReset} type="button">
-            Сбросить
-          </button>
-        </div>
-      </form>
-      <p className={`form-status settings-status ${status ? "visible" : ""}`}>{status || " "}</p>
+      <div className="backend-url-fixed">
+        <strong>{defaultBackendUrl}</strong>
+        <span>Адрес встроен в клиент и применяется автоматически.</span>
+      </div>
     </section>
   );
 }
@@ -608,6 +682,7 @@ function ConfirmForm({
 
 function Dashboard({
   backendConfigVersion,
+  onBootstrapReady,
   session,
   onLogout,
   onSessionUserUpdate,
@@ -615,6 +690,7 @@ function Dashboard({
   onThemeChange,
 }: {
   backendConfigVersion: number;
+  onBootstrapReady?: () => void;
   session: Session;
   onLogout: () => void;
   onSessionUserUpdate: (user: CurrentUser) => void;
@@ -624,7 +700,16 @@ function Dashboard({
   const [friends, setFriends] = React.useState<UserPublic[]>([]);
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
-  const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() => [loadStoredDashboardSection()]);
+  const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() =>
+    Array.from(new Set<DashboardSection>([loadStoredDashboardSection(), ...REQUIRED_BOOTSTRAP_SECTIONS])),
+  );
+  const [dashboardCoreReady, setDashboardCoreReady] = React.useState(false);
+  const [readySections, setReadySections] = React.useState<Partial<Record<DashboardSection, boolean>>>({
+    profile: true,
+    clips: true,
+    settings: true,
+  });
+  const bootstrapReadySentRef = React.useRef(false);
   const {
     notificationsOpen,
     setNotificationsOpen,
@@ -644,7 +729,23 @@ function Dashboard({
   });
 
   React.useEffect(() => {
-    void listFriends(session.token).then((response) => setFriends(response.friends));
+    let active = true;
+    setDashboardCoreReady(false);
+    void listFriends(session.token)
+      .then((response) => {
+        if (!active) {
+          return;
+        }
+        setFriends(response.friends);
+      })
+      .finally(() => {
+        if (active) {
+          setDashboardCoreReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [session.token]);
 
   React.useEffect(() => {
@@ -700,6 +801,27 @@ function Dashboard({
   React.useEffect(() => {
     setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
   }, [section]);
+
+  const markSectionReady = React.useCallback((targetSection: DashboardSection) => {
+    setReadySections((current) => (current[targetSection] ? current : { ...current, [targetSection]: true }));
+  }, []);
+
+  React.useEffect(() => {
+    if (section === "profile" || section === "clips" || section === "settings") {
+      markSectionReady(section);
+    }
+  }, [markSectionReady, section]);
+
+  React.useEffect(() => {
+    if (!dashboardCoreReady || !readySections[section] || bootstrapReadySentRef.current) {
+      return;
+    }
+    if (!REQUIRED_BOOTSTRAP_SECTIONS.every((targetSection) => readySections[targetSection])) {
+      return;
+    }
+    bootstrapReadySentRef.current = true;
+    onBootstrapReady?.();
+  }, [dashboardCoreReady, onBootstrapReady, readySections, section]);
 
   function openOwnProfile() {
     setSelectedProfile(null);
@@ -758,7 +880,7 @@ function Dashboard({
         </button>
       </aside>
 
-      <section className="content">
+      <section className={`content ${section === "chats" ? "is-chat-section" : ""}`.trim()}>
         {mountedSections.includes("profile") ? (
         <div style={{ display: section === "profile" ? "block" : "none" }}>
           <ProfilePanel
@@ -773,15 +895,16 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("home") ? (
         <div style={{ display: section === "home" ? "block" : "none" }}>
-          <HomePanel onOpenProfile={openUserProfile} token={session.token} />
+          <HomePanel onInitialReady={() => markSectionReady("home")} onOpenProfile={openUserProfile} token={session.token} />
         </div>
         ) : null}
         {mountedSections.includes("chats") ? (
-        <div style={{ display: section === "chats" ? "block" : "none" }}>
+        <div className="section-shell section-shell-chat" style={{ display: section === "chats" ? "flex" : "none" }}>
           <ChatsPanel
             backendConfigVersion={backendConfigVersion}
             friends={friends}
             me={session.user}
+            onInitialReady={() => markSectionReady("chats")}
             onOpenProfile={openUserProfile}
             token={session.token}
           />
@@ -789,12 +912,12 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("friends") ? (
         <div style={{ display: section === "friends" ? "block" : "none" }}>
-          <FriendsPanel token={session.token} onFriendsChanged={setFriends} onOpenProfile={openUserProfile} />
+          <FriendsPanel onInitialReady={() => markSectionReady("friends")} token={session.token} onFriendsChanged={setFriends} onOpenProfile={openUserProfile} />
         </div>
         ) : null}
         {mountedSections.includes("games") ? (
         <div style={{ display: section === "games" ? "block" : "none" }}>
-          <GamesPanel friends={friends} onOpenProfile={openUserProfile} onSessionUserUpdate={onSessionUserUpdate} token={session.token} />
+          <GamesPanel friends={friends} onInitialReady={() => markSectionReady("games")} onOpenProfile={openUserProfile} onSessionUserUpdate={onSessionUserUpdate} token={session.token} />
         </div>
         ) : null}
         {mountedSections.includes("clips") ? (
@@ -1372,9 +1495,10 @@ function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): Profil
   }
 }
 
-function HomePanel({ token, onOpenProfile }: { token: string; onOpenProfile: (user: UserPublic) => void }) {
+function HomePanel({ token, onInitialReady, onOpenProfile }: { token: string; onInitialReady?: SectionReadyCallback; onOpenProfile: (user: UserPublic) => void }) {
   const [items, setItems] = React.useState<FeedPublication[]>([]);
   const [status, setStatus] = React.useState("");
+  const initialReadyRef = React.useRef(false);
 
   React.useEffect(() => {
     let active = true;
@@ -1392,11 +1516,18 @@ function HomePanel({ token, onOpenProfile }: { token: string; onOpenProfile: (us
           return;
         }
         setStatus(error instanceof Error ? error.message : "Не удалось загрузить публикации");
+      })
+      .finally(() => {
+        if (!active || initialReadyRef.current) {
+          return;
+        }
+        initialReadyRef.current = true;
+        onInitialReady?.();
       });
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [onInitialReady, token]);
 
   return (
     <section className="tool-band single-column">
@@ -1450,16 +1581,19 @@ function HomePanel({ token, onOpenProfile }: { token: string; onOpenProfile: (us
 function GamesPanel({
   token,
   friends,
+  onInitialReady,
   onOpenProfile,
   onSessionUserUpdate,
 }: {
   token: string;
   friends: UserPublic[];
+  onInitialReady?: SectionReadyCallback;
   onOpenProfile: (user: UserPublic) => void;
   onSessionUserUpdate: (user: CurrentUser) => void;
 }) {
   const [steam, setSteam] = React.useState<SteamOverview | null>(null);
   const [status, setStatus] = React.useState("");
+  const initialReadyRef = React.useRef(false);
 
   React.useEffect(() => {
     void loadOverview();
@@ -1489,8 +1623,17 @@ function GamesPanel({
   }, [token]);
 
   async function loadOverview() {
-    const overview = await getGamesOverview(token);
-    setSteam(overview.steam);
+    try {
+      const overview = await getGamesOverview(token);
+      setSteam(overview.steam);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить игровые интеграции");
+    } finally {
+      if (!initialReadyRef.current) {
+        initialReadyRef.current = true;
+        onInitialReady?.();
+      }
+    }
   }
 
   async function refreshCurrentUser() {
@@ -1682,13 +1825,52 @@ function SettingsPanel({
   const [notifEnabled, setNotifEnabled] = React.useState(true);
   const [themesOpen, setThemesOpen] = React.useState(false);
   const [notificationSoundUrl, setNotificationSoundUrl] = React.useState(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
+  const [notificationSoundName, setNotificationSoundName] = React.useState(() => getNotificationSoundName(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL));
   const [notificationVolume, setNotificationVolume] = React.useState(Math.round((user.notification_volume ?? 0.7) * 100));
+  const [notificationSoundDragActive, setNotificationSoundDragActive] = React.useState(false);
+  const [notificationSoundUploading, setNotificationSoundUploading] = React.useState(false);
   const [settingsStatus, setSettingsStatus] = React.useState("");
+  const notificationSoundInputRef = React.useRef<HTMLInputElement | null>(null);
+  const notificationPreviewAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  const notificationSoundDisplayName = notificationSoundName || getNotificationSoundName(notificationSoundUrl);
 
   React.useEffect(() => {
     setNotificationSoundUrl(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL);
+    setNotificationSoundName(getNotificationSoundName(user.notification_sound_url || DEFAULT_NOTIFICATION_SOUND_URL));
     setNotificationVolume(Math.round((user.notification_volume ?? 0.7) * 100));
   }, [user.notification_sound_url, user.notification_volume]);
+
+  React.useEffect(() => {
+    if (!notificationPreviewAudioRef.current) {
+      return;
+    }
+    notificationPreviewAudioRef.current.volume = Math.max(0, Math.min(1, notificationVolume / 100));
+  }, [notificationVolume]);
+
+  async function handleNotificationSoundUpload(file: File) {
+    const looksLikeAudio = file.type.startsWith("audio/") || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name);
+    if (!looksLikeAudio) {
+      setSettingsStatus("Можно загрузить только аудиофайл для звука уведомления.");
+      return;
+    }
+
+    setNotificationSoundUploading(true);
+    setSettingsStatus(`Загружаем ${file.name}...`);
+
+    try {
+      const uploaded = await uploadPublicMedia(token, file, "notification-sound");
+      setNotificationSoundUrl(uploaded.asset_url);
+      setNotificationSoundName(file.name);
+      setSettingsStatus("Новый звук уведомления загружен. Не забудь сохранить настройки.");
+    } catch (error) {
+      setSettingsStatus(error instanceof Error ? error.message : "Не удалось загрузить звук уведомления");
+    } finally {
+      setNotificationSoundUploading(false);
+      if (notificationSoundInputRef.current) {
+        notificationSoundInputRef.current.value = "";
+      }
+    }
+  }
 
   async function handleSaveNotificationSettings() {
     setSettingsStatus("Сохраняем настройки уведомлений...");
@@ -1714,14 +1896,7 @@ function SettingsPanel({
         </div>
 
         <div className="settings-section-grid">
-          <BackendUrlCard
-            className="settings-panel-card"
-            onSaved={() => {
-              setSettingsStatus(
-                `Backend URL обновлен. Новые запросы уже пойдут на ${getBackendHttpUrl()}, realtime переподключен.`,
-              );
-            }}
-          />
+          <BackendEndpointCard className="settings-panel-card" />
 
           <section className="settings-panel-card">
             <div className="settings-card-head">
@@ -1767,22 +1942,114 @@ function SettingsPanel({
               <label className="settings-toggle-row settings-input-row">
                 <div>
                   <strong>Звук уведомления</strong>
-                  <span>URL звука, который будет проигрываться при новом уведомлении.</span>
+                  <span>Перетащи свой mp3, wav, ogg или выбери файл вручную.</span>
                 </div>
-                <input onChange={(event) => setNotificationSoundUrl(event.target.value)} value={notificationSoundUrl} />
+                <div
+                  className={`notification-sound-dropzone ${notificationSoundDragActive ? "is-drag-active" : ""} ${notificationSoundUploading ? "is-uploading" : ""}`}
+                  onClick={() => notificationSoundInputRef.current?.click()}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setNotificationSoundDragActive(true);
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    const nextTarget = event.relatedTarget;
+                    if (!nextTarget || !(event.currentTarget as HTMLDivElement).contains(nextTarget as Node)) {
+                      setNotificationSoundDragActive(false);
+                    }
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    setNotificationSoundDragActive(true);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setNotificationSoundDragActive(false);
+                    const file = event.dataTransfer.files?.[0];
+                    if (file) {
+                      void handleNotificationSoundUpload(file);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      notificationSoundInputRef.current?.click();
+                    }
+                  }}
+                >
+                  <input
+                    accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac"
+                    className="notification-sound-input"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        void handleNotificationSoundUpload(file);
+                      }
+                    }}
+                    ref={notificationSoundInputRef}
+                    type="file"
+                  />
+                  <div className="notification-sound-dropzone-copy">
+                    <div className="notification-sound-dropzone-icon">
+                      <Paperclip size={18} />
+                    </div>
+                    <div>
+                      <strong>{notificationSoundUploading ? "Загрузка..." : "Добавить свой звук"}</strong>
+                      <span>{notificationSoundDisplayName}</span>
+                    </div>
+                  </div>
+                  <div className="notification-sound-dropzone-actions">
+                    <button
+                      className="inline-action secondary"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setNotificationSoundUrl(DEFAULT_NOTIFICATION_SOUND_URL);
+                        setNotificationSoundName(getNotificationSoundName(DEFAULT_NOTIFICATION_SOUND_URL));
+                        setSettingsStatus("Возвращен стандартный звук. Нажми сохранить, чтобы применить.");
+                      }}
+                      type="button"
+                    >
+                      Сбросить
+                    </button>
+                  </div>
+                </div>
+                <div className="notification-sound-preview-card">
+                  <div className="notification-sound-preview-meta">
+                    <div className="notification-sound-preview-icon">
+                      <Bell size={16} />
+                    </div>
+                    <div>
+                      <strong>{notificationSoundDisplayName}</strong>
+                      <span className="notification-sound-url">{notificationSoundUrl}</span>
+                    </div>
+                  </div>
+                  <audio
+                    className="notification-sound-preview"
+                    controls
+                    preload="metadata"
+                    ref={notificationPreviewAudioRef}
+                    src={notificationSoundUrl}
+                  />
+                </div>
               </label>
-              <label className="settings-toggle-row settings-input-row">
-                <div>
+              <label className="settings-toggle-row settings-input-row volume-control-row">
+                <div className="volume-control-copy">
                   <strong>Громкость</strong>
                   <span>{notificationVolume}%</span>
                 </div>
-                <input
-                  max={100}
-                  min={0}
-                  onChange={(event) => setNotificationVolume(Number(event.target.value))}
-                  type="range"
-                  value={notificationVolume}
-                />
+                <div className="volume-control-shell">
+                  <input
+                    className="notification-volume-slider"
+                    max={100}
+                    min={0}
+                    onChange={(event) => setNotificationVolume(Number(event.target.value))}
+                    type="range"
+                    value={notificationVolume}
+                  />
+                </div>
               </label>
             </div>
             <button className="settings-save-button" onClick={() => void handleSaveNotificationSettings()} type="button">
@@ -1829,11 +2096,28 @@ function SettingsPanel({
   );
 }
 
+function getNotificationSoundName(url: string): string {
+  if (!url) {
+    return "Стандартный звук FrCenter";
+  }
+  try {
+    const fileName = new URL(url).pathname.split("/").filter(Boolean).pop();
+    if (!fileName) {
+      return "Пользовательский звук";
+    }
+    return decodeURIComponent(fileName);
+  } catch {
+    return url;
+  }
+}
+
 function FriendsPanel({
+  onInitialReady,
   token,
   onFriendsChanged,
   onOpenProfile,
 }: {
+  onInitialReady?: SectionReadyCallback;
   token: string;
   onFriendsChanged: (friends: UserPublic[]) => void;
   onOpenProfile: (friend: UserPublic) => void;
@@ -1842,6 +2126,7 @@ function FriendsPanel({
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
+  const initialReadyRef = React.useRef(false);
   const onlineFriends = React.useMemo(
     () => friends.filter((friend) => normalizeStatus(friend.status) === "online").length,
     [friends],
@@ -1853,9 +2138,16 @@ function FriendsPanel({
   }, [token]);
 
   async function refreshFriends() {
-    const response = await listFriends(token);
-    setFriends(response.friends);
-    onFriendsChanged(response.friends);
+    try {
+      const response = await listFriends(token);
+      setFriends(response.friends);
+      onFriendsChanged(response.friends);
+    } finally {
+      if (!initialReadyRef.current) {
+        initialReadyRef.current = true;
+        onInitialReady?.();
+      }
+    }
   }
 
   async function loadPersonalInviteCode() {
@@ -1976,12 +2268,14 @@ function ChatsPanel({
   token,
   me,
   friends,
+  onInitialReady,
   onOpenProfile,
 }: {
   backendConfigVersion: number;
   token: string;
   me: CurrentUser;
   friends: UserPublic[];
+  onInitialReady?: SectionReadyCallback;
   onOpenProfile: (user: UserPublic) => void;
 }) {
   const [chats, setChats] = React.useState<Chat[]>([]);
@@ -2028,6 +2322,7 @@ function ChatsPanel({
     return window.matchMedia("(max-width: 820px)").matches;
   });
   const [mobileChatOpen, setMobileChatOpen] = React.useState(false);
+  const initialReadyRef = React.useRef(false);
 
   const createParticipantsDropdownRef = React.useRef<HTMLDivElement | null>(null);
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -2391,6 +2686,28 @@ function ChatsPanel({
     scrollToBottom();
   }, [messages.length, selectedChatId, scrollToBottom]);
 
+  React.useEffect(() => {
+    if (initialReadyRef.current || !chatCacheHydrated || chatsLoading) {
+      return;
+    }
+    if (orderedChats.length === 0) {
+      initialReadyRef.current = true;
+      onInitialReady?.();
+      return;
+    }
+    if (!isMobile && !selectedChatId) {
+      return;
+    }
+    if (selectedChatId && messagesLoading) {
+      return;
+    }
+    if (selectedChatId && !chatMessagePageInfoRef.current[selectedChatId] && !chatMessagesCacheRef.current[selectedChatId]) {
+      return;
+    }
+    initialReadyRef.current = true;
+    onInitialReady?.();
+  }, [chatCacheHydrated, chatsLoading, isMobile, messagesLoading, onInitialReady, orderedChats.length, selectedChatId]);
+
   async function reloadChats() {
     setChatsLoading(true);
     try {
@@ -2553,6 +2870,18 @@ function ChatsPanel({
       }
       setDecodeMap(decoded);
       await markChatAsRead(chatId);
+    } catch (error) {
+      if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
+        return;
+      }
+      chatMessagePageInfoRef.current[chatId] = {
+        id: null,
+        createdAt: null,
+        hasMore: false,
+      };
+      setMessagesHasMore(false);
+      setMessagesCursor({ id: null, createdAt: null });
+      setStatus(error instanceof Error ? error.message : "Не удалось загрузить сообщения");
     } finally {
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
         setMessagesLoading(false);
@@ -4025,4 +4354,4 @@ async function deriveDeterministicChatKey(chatId: string): Promise<string> {
   return bytesToBase64(new Uint8Array(digest));
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")!).render(<BootstrapApp />);

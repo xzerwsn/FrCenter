@@ -113,13 +113,22 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const backendUrl = getBackendHttpUrl();
   try {
     return await fetch(input, init);
   } catch {
-    throw new Error(
-      `Не удалось подключиться к серверу (${backendUrl}). Проверь, что backend запущен и CORS разрешает origin фронтенда.`,
-    );
+    await wait(1200);
+    try {
+      return await fetch(input, init);
+    } catch {
+      throw new Error(
+        `Не удалось подключиться к серверу (${backendUrl}). Если backend на Render, он может просыпаться после cold start. Также проверь CORS и доступность сервиса.`,
+      );
+    }
   }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

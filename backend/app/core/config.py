@@ -37,13 +37,14 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173,"
         "http://tauri.localhost,"
         "https://tauri.localhost,"
-        "tauri://localhost"
+        "tauri://localhost,"
+        "https://frcenter-frontend.onrender.com"
     )
     frontend_origin_regex: str = (
-        r"^https?://"
+        r"^(?:https?://"
         r"(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|"
         r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|26\.\d+\.\d+\.\d+)"
-        r"(?::\d+)?$"
+        r"(?::\d+)?|https://[a-z0-9-]+\.onrender\.com|tauri://localhost)$"
     )
     backend_url: str = "http://localhost:8000"
     steam_web_api_key: str = ""
