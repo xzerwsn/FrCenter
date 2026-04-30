@@ -6,6 +6,7 @@ export function useRealtimeSubscription(
   connectionKey: number,
   token: string | undefined,
   onEvent: (event: RealtimeEvent) => void,
+  enabled = true,
 ): void {
   const eventRef = React.useRef(onEvent);
 
@@ -14,9 +15,12 @@ export function useRealtimeSubscription(
   }, [onEvent]);
 
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const socket = connectRealtime(token, (event) => {
       eventRef.current(event);
     });
     return () => socket.close();
-  }, [connectionKey, token]);
+  }, [connectionKey, enabled, token]);
 }

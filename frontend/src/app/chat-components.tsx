@@ -6,6 +6,7 @@ import type { Message } from "../api/chats";
 import type { UserPublic } from "../api/users";
 import { getBackendHttpUrl } from "../config/backend-url";
 import { decryptBytesWithSharedKey } from "../crypto/messages";
+import { acquireCachedMediaUrl, releaseCachedMediaUrl } from "./media-cache";
 
 export type MediaPayloadFile = {
   media_id: string;
@@ -40,7 +41,7 @@ export const MediaMessageView = React.memo(function MediaMessageView({
 
   React.useEffect(() => {
     let active = true;
-    const urlsToRevoke: string[] = [];
+    const cacheKeys: string[] = [];
 
     async function resolveMedia() {
       if (!mediaPayloadFiles || !chatId) {
@@ -50,20 +51,22 @@ export const MediaMessageView = React.memo(function MediaMessageView({
         const chatKey = await ensureChatKey(chatId);
         const nextFiles: Array<{ payload: MediaPayloadFile; url: string }> = [];
         for (const payload of mediaPayloadFiles) {
-          const response = await fetch(resolveMediaFetchUrl(payload), {
-            credentials: "include",
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          const cacheKey = createMediaCacheKey(chatId, payload);
+          cacheKeys.push(cacheKey);
+          const fileUrl = await acquireCachedMediaUrl(cacheKey, async () => {
+            const response = await fetch(resolveMediaFetchUrl(payload), {
+              credentials: "include",
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            });
+            if (!response.ok) {
+              throw new Error(`Не удалось загрузить медиа (${response.status})`);
+            }
+            const encryptedBytes = new Uint8Array(await response.arrayBuffer());
+            const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, payload.file_nonce, chatKey);
+            const safeBytes = new Uint8Array(decryptedBytes.byteLength);
+            safeBytes.set(decryptedBytes);
+            return new Blob([safeBytes.buffer], { type: payload.file_mime || "application/octet-stream" });
           });
-          if (!response.ok) {
-            throw new Error(`Не удалось загрузить медиа (${response.status})`);
-          }
-          const encryptedBytes = new Uint8Array(await response.arrayBuffer());
-          const decryptedBytes = await decryptBytesWithSharedKey(encryptedBytes, payload.file_nonce, chatKey);
-          const safeBytes = new Uint8Array(decryptedBytes.byteLength);
-          safeBytes.set(decryptedBytes);
-          const blob = new Blob([safeBytes.buffer], { type: payload.file_mime || "application/octet-stream" });
-          const fileUrl = URL.createObjectURL(blob);
-          urlsToRevoke.push(fileUrl);
           nextFiles.push({ payload, url: fileUrl });
         }
         if (active) {
@@ -82,8 +85,8 @@ export const MediaMessageView = React.memo(function MediaMessageView({
     void resolveMedia();
     return () => {
       active = false;
-      for (const url of urlsToRevoke) {
-        URL.revokeObjectURL(url);
+      for (const cacheKey of cacheKeys) {
+        releaseCachedMediaUrl(cacheKey);
       }
     };
   }, [chatId, ensureChatKey, mediaPayloadFiles, onMediaReady, token]);
@@ -251,38 +254,49 @@ export const VirtualMessageList = React.memo(function VirtualMessageList({
   ensureChatKey: (chatId: string) => Promise<string>;
   onOpenProfile: (user: UserPublic) => void;
 }) {
+  const messageLayout = React.useMemo(
+    () =>
+      messages.map((message, index) => {
+        const previousMessage = index > 0 ? messages[index - 1] : null;
+        const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+        return {
+          compactTop: previousMessage?.sender.id === message.sender.id,
+          compactBottom: nextMessage?.sender.id === message.sender.id,
+        };
+      }),
+    [messages],
+  );
+
   const itemContent = React.useCallback(
     (index: number, message: Message) => {
-      const previousMessage = index > 0 ? messages[index - 1] : null;
-      const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
-      const sameSenderAsPrevious = previousMessage?.sender.id === message.sender.id;
-      const sameSenderAsNext = nextMessage?.sender.id === message.sender.id;
+      const layout = messageLayout[index] ?? { compactTop: false, compactBottom: false };
+      const isMine = message.sender.id === currentUserId;
       return (
-      <div
-        className={`message-row ${message.sender.id === currentUserId ? "mine" : "other"} ${sameSenderAsPrevious ? "grouped" : ""} ${
-          sameSenderAsNext ? "group-continues" : ""
-        }`}
-      >
-        <MessageBubble
-          canManageMessage={canManageMessage(message)}
-          chatId={chatId}
-          compactBottom={sameSenderAsNext}
-          compactTop={sameSenderAsPrevious}
-          decodedText={decodeMap[message.id] ?? ""}
-          ensureChatKey={ensureChatKey}
-          isMine={message.sender.id === currentUserId}
-          message={message}
-          onMediaReady={onMediaReady}
-          onOpenContextMenu={onOpenContextMenu}
-          onOpenProfile={onOpenProfile}
-          onPreviewMedia={onPreviewMedia}
-          showHeader={!sameSenderAsPrevious}
-          token={token}
-        />
-      </div>
-    );
+        <div
+          className={`message-row ${isMine ? "mine" : "other"} ${layout.compactTop ? "grouped" : ""} ${
+            layout.compactBottom ? "group-continues" : ""
+          }`}
+        >
+          <MessageBubble
+            canManageMessage={canManageMessage(message)}
+            chatId={chatId}
+            compactBottom={layout.compactBottom}
+            compactTop={layout.compactTop}
+            decodedText={decodeMap[message.id] ?? ""}
+            ensureChatKey={ensureChatKey}
+            isMine={isMine}
+            message={message}
+            onMediaReady={onMediaReady}
+            onOpenContextMenu={onOpenContextMenu}
+            onOpenProfile={onOpenProfile}
+            onPreviewMedia={onPreviewMedia}
+            showHeader={!layout.compactTop}
+            token={token}
+          />
+        </div>
+      );
     },
-    [canManageMessage, chatId, currentUserId, decodeMap, ensureChatKey, messages, onMediaReady, onOpenContextMenu, onOpenProfile, onPreviewMedia, token],
+    [canManageMessage, chatId, currentUserId, decodeMap, ensureChatKey, messageLayout, onMediaReady, onOpenContextMenu, onOpenProfile, onPreviewMedia, token],
   );
 
   return (
@@ -293,7 +307,7 @@ export const VirtualMessageList = React.memo(function VirtualMessageList({
       computeItemKey={(_index, message) => message.id}
       data={messages}
       followOutput={false}
-      increaseViewportBy={{ top: 400, bottom: 800 }}
+      increaseViewportBy={{ top: 96, bottom: 144 }}
       initialTopMostItemIndex={Math.max(messages.length - 1, 0)}
       itemContent={itemContent}
       ref={virtuosoRef}
@@ -348,6 +362,15 @@ function normalizeMediaPayloadFile(payload: Partial<MediaPayloadFile> | null | u
     file_mime: payload.file_mime ?? "application/octet-stream",
     file_nonce: payload.file_nonce ?? "",
   };
+}
+
+function createMediaCacheKey(chatId: string, payload: MediaPayloadFile): string {
+  return [
+    chatId,
+    payload.media_id || payload.media_path || payload.media_url,
+    payload.file_nonce,
+    payload.file_mime,
+  ].join("::");
 }
 
 function resolveMediaFetchUrl(payload: MediaPayloadFile): string {

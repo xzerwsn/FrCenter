@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse, ORJSONResponse
 from starlette.responses import Response
 
 from app.api.router import api_router
@@ -10,6 +11,11 @@ from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal, init_db
 from app.services.notification_service import create_deploy_notifications
+
+try:
+    import orjson  # noqa: F401
+except ImportError:
+    orjson = None
 
 
 @asynccontextmanager
@@ -32,7 +38,12 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    response_class = ORJSONResponse if orjson is not None else JSONResponse
+    app = FastAPI(
+        title=settings.app_name,
+        lifespan=lifespan,
+        default_response_class=response_class,
+    )
 
     app.add_middleware(
         CORSMiddleware,

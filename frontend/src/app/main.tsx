@@ -88,6 +88,14 @@ import { DEFAULT_NOTIFICATION_SOUND_URL, useNotificationsStore } from "./notific
 import { useRealtimeSubscription } from "./realtime-store";
 import { clearSession, loadSession, saveSession, type Session } from "./session";
 import { applyTheme, loadStoredThemeId, persistThemeId, SITE_THEMES, type SiteTheme } from "./settings-store";
+import { parseJsonTextInWorker } from "./transport-worker-client";
+import {
+  cacheRecentMessagesInTauri,
+  clearRecentMessagesInTauri,
+  hasTauriIpc,
+  invokeTauriCommand,
+  loadRecentMessagesFromTauri,
+} from "./tauri-bridge";
 import "../styles/globals.css";
 import frcenterIcon from "../assets/frcenter-icon.png";
 import frcenterLoaderReference from "../assets/frcenter-loader-reference-v2.png";
@@ -95,12 +103,26 @@ import frcenterLoaderReference from "../assets/frcenter-loader-reference-v2.png"
 type AuthMode = "login" | "register" | "confirm";
 type DashboardSection = "profile" | "home" | "chats" | "friends" | "games" | "clips" | "settings";
 const REQUIRED_BOOTSTRAP_SECTIONS: DashboardSection[] = ["home", "friends", "chats"];
+const BOOTSTRAP_SECTION_SEQUENCE: DashboardSection[] = ["friends", "home", "chats"];
+const FEED_CACHE_STORAGE_KEY_PREFIX = "frcenter.feedCache.";
+const FRIENDS_CACHE_STORAGE_KEY_PREFIX = "frcenter.friendsCache.";
+const BOOT_STAGE_BY_SECTION: Record<DashboardSection, string> = {
+  profile: "Restoring profile shell",
+  home: "Loading publications",
+  chats: "Loading chat directory",
+  friends: "Loading friends network",
+  games: "Syncing game accounts",
+  clips: "Preparing media gallery",
+  settings: "Loading preferences",
+};
 
 const PINNED_CHATS_STORAGE_KEY = "frcenter.pinnedChats";
 const HIDDEN_CHATS_STORAGE_KEY = "frcenter.hiddenChats";
 const DASHBOARD_SECTION_STORAGE_KEY = "frcenter.dashboardSection";
 const SELECTED_PROFILE_STORAGE_KEY = "frcenter.selectedProfile";
 const chatKeyCache = new Map<string, Promise<string>>();
+const MESSAGE_PAGE_SIZE = 30;
+const PREFETCH_MESSAGE_PAGE_SIZE = 20;
 
 type MessageContextMenuState = {
   message: Message;
@@ -125,7 +147,7 @@ const LOADING_STAGES = [
 
 type SectionReadyCallback = () => void;
 
-function App({ onReady }: { onReady?: () => void }) {
+function App({ onReady, onBootStatus }: { onReady?: () => void; onBootStatus?: (progress: number, stage: string) => void }) {
   const [session, setSession] = React.useState<Session | null>(() => loadSession());
   const [authMode, setAuthMode] = React.useState<AuthMode>("login");
   const [pendingEmail, setPendingEmail] = React.useState("");
@@ -159,6 +181,7 @@ function App({ onReady }: { onReady?: () => void }) {
       .finally(() => {
         void resetCryptoWorkerSession();
         void clearDecodedMessagesCache();
+        void clearRecentMessagesInTauri();
         clearSession();
         setSession(null);
         setAuthBootstrapDone(true);
@@ -297,6 +320,7 @@ function App({ onReady }: { onReady?: () => void }) {
     <DesktopWindowFrame>
       <Dashboard
         backendConfigVersion={backendConfigVersion}
+        onBootstrapStatus={onBootStatus}
         onBootstrapReady={onReady}
         session={session}
         onLogout={handleLogout}
@@ -316,9 +340,9 @@ function BootstrapApp() {
   const [appReady, setAppReady] = React.useState(false);
   const [overlayVisible, setOverlayVisible] = React.useState(true);
   const [overlayClosing, setOverlayClosing] = React.useState(false);
-  const [progress, setProgress] = React.useState(12);
-  const [stageIndex, setStageIndex] = React.useState(0);
-  const bootStartedAt = React.useRef(Date.now());
+  const [targetProgress, setTargetProgress] = React.useState(10);
+  const [progress, setProgress] = React.useState(10);
+  const [stage, setStage] = React.useState("Restoring local cache");
 
   React.useEffect(() => {
     if (!overlayVisible) {
@@ -326,56 +350,48 @@ function BootstrapApp() {
     }
 
     const intervalId = window.setInterval(() => {
-      const elapsed = Date.now() - bootStartedAt.current;
-      const pendingCap = Math.min(92, 12 + elapsed / 28);
-      const target = appReady ? 100 : pendingCap;
-
       setProgress((current) => {
+        const target = appReady ? 100 : targetProgress;
         if (current >= target) {
           return current;
         }
-        const step = appReady ? 7.5 : Math.max(1.2, (target - current) * 0.22);
+        const step = appReady ? 8 : Math.max(1, (target - current) * 0.24);
         return Math.min(target, current + step);
-      });
-
-      setStageIndex((current) => {
-        if (appReady) {
-          return LOADING_STAGES.length - 1;
-        }
-        const nextIndex = Math.min(LOADING_STAGES.length - 2, Math.floor(elapsed / 520));
-        return Math.max(current, nextIndex);
       });
     }, 80);
 
     return () => window.clearInterval(intervalId);
-  }, [appReady, overlayVisible]);
+  }, [appReady, overlayVisible, targetProgress]);
 
   React.useEffect(() => {
     if (!appReady || !overlayVisible) {
       return;
     }
-
-    const elapsed = Date.now() - bootStartedAt.current;
-    const remainingVisibleMs = Math.max(0, 1500 - elapsed);
+    setStage(LOADING_STAGES[LOADING_STAGES.length - 1] ?? "Opening FrCenter");
     const completeTimer = window.setTimeout(() => {
       setProgress(100);
-      setStageIndex(LOADING_STAGES.length - 1);
       setOverlayClosing(true);
       const hideTimer = window.setTimeout(() => setOverlayVisible(false), 560);
       return () => window.clearTimeout(hideTimer);
-    }, remainingVisibleMs);
+    }, 260);
 
     return () => window.clearTimeout(completeTimer);
   }, [appReady, overlayVisible]);
 
   return (
     <>
-      <App onReady={() => setAppReady(true)} />
+      <App
+        onBootStatus={(nextProgress, nextStage) => {
+          setTargetProgress(Math.max(10, Math.min(96, nextProgress)));
+          setStage(nextStage);
+        }}
+        onReady={() => setAppReady(true)}
+      />
       {overlayVisible ? (
         <LoadingScreen
           closing={overlayClosing}
           progress={progress}
-          stage={LOADING_STAGES[stageIndex] ?? LOADING_STAGES[LOADING_STAGES.length - 1]}
+          stage={stage}
         />
       ) : null}
     </>
@@ -429,12 +445,6 @@ function AuthShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-type TauriWindowInternals = Window & {
-  __TAURI_INTERNALS__?: {
-    invoke?: <Result = unknown>(command: string, payload?: Record<string, unknown>) => Promise<Result>;
-  };
-};
-
 function DesktopWindowFrame({ children }: { children: React.ReactNode }) {
   const desktop = useIsTauriDesktop();
 
@@ -454,7 +464,7 @@ function DesktopWindowFrame({ children }: { children: React.ReactNode }) {
 
 function DesktopTitlebar() {
   async function handleWindowAction(command: "minimize_window" | "toggle_maximize_window" | "close_window") {
-    await invokeTauriWindowCommand(command);
+    await invokeTauriCommand(command);
   }
 
   return (
@@ -682,6 +692,7 @@ function ConfirmForm({
 
 function Dashboard({
   backendConfigVersion,
+  onBootstrapStatus,
   onBootstrapReady,
   session,
   onLogout,
@@ -690,6 +701,7 @@ function Dashboard({
   onThemeChange,
 }: {
   backendConfigVersion: number;
+  onBootstrapStatus?: (progress: number, stage: string) => void;
   onBootstrapReady?: () => void;
   session: Session;
   onLogout: () => void;
@@ -697,13 +709,14 @@ function Dashboard({
   themeId: string;
   onThemeChange: (themeId: string) => void;
 }) {
-  const [friends, setFriends] = React.useState<UserPublic[]>([]);
+  const [friends, setFriends] = React.useState<UserPublic[]>(() => readCachedFriends(session.user.id));
   const [section, setSection] = React.useState<DashboardSection>(() => loadStoredDashboardSection());
   const [selectedProfile, setSelectedProfile] = React.useState<UserPublic | CurrentUser | null>(() => loadStoredSelectedProfile());
   const [mountedSections, setMountedSections] = React.useState<DashboardSection[]>(() =>
-    Array.from(new Set<DashboardSection>([loadStoredDashboardSection(), ...REQUIRED_BOOTSTRAP_SECTIONS])),
+    Array.from(new Set<DashboardSection>([loadStoredDashboardSection(), BOOTSTRAP_SECTION_SEQUENCE[0]])),
   );
-  const [dashboardCoreReady, setDashboardCoreReady] = React.useState(false);
+  const [bootstrapStepIndex, setBootstrapStepIndex] = React.useState(0);
+  const [postBootFeaturesEnabled, setPostBootFeaturesEnabled] = React.useState(false);
   const [readySections, setReadySections] = React.useState<Partial<Record<DashboardSection, boolean>>>({
     profile: true,
     clips: true,
@@ -723,30 +736,11 @@ function Dashboard({
     readNotification,
   } = useNotificationsStore({
     backendConfigVersion,
+    enabled: postBootFeaturesEnabled,
     token: session.token,
     currentUser: session.user,
     onFriendsChanged: setFriends,
   });
-
-  React.useEffect(() => {
-    let active = true;
-    setDashboardCoreReady(false);
-    void listFriends(session.token)
-      .then((response) => {
-        if (!active) {
-          return;
-        }
-        setFriends(response.friends);
-      })
-      .finally(() => {
-        if (active) {
-          setDashboardCoreReady(true);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [session.token]);
 
   React.useEffect(() => {
     let active = true;
@@ -802,8 +796,20 @@ function Dashboard({
     setMountedSections((current) => (current.includes(section) ? current : [...current, section]));
   }, [section]);
 
+  React.useEffect(() => {
+    const activeBootstrapSection = BOOTSTRAP_SECTION_SEQUENCE[bootstrapStepIndex];
+    if (!activeBootstrapSection) {
+      return;
+    }
+    setMountedSections((current) => (current.includes(activeBootstrapSection) ? current : [...current, activeBootstrapSection]));
+  }, [bootstrapStepIndex]);
+
   const markSectionReady = React.useCallback((targetSection: DashboardSection) => {
+    const bootstrapIndex = BOOTSTRAP_SECTION_SEQUENCE.indexOf(targetSection);
     setReadySections((current) => (current[targetSection] ? current : { ...current, [targetSection]: true }));
+    if (bootstrapIndex >= 0) {
+      setBootstrapStepIndex((current) => (current === bootstrapIndex ? Math.min(current + 1, BOOTSTRAP_SECTION_SEQUENCE.length) : current));
+    }
   }, []);
 
   React.useEffect(() => {
@@ -813,15 +819,34 @@ function Dashboard({
   }, [markSectionReady, section]);
 
   React.useEffect(() => {
-    if (!dashboardCoreReady || !readySections[section] || bootstrapReadySentRef.current) {
+    const completedSections = REQUIRED_BOOTSTRAP_SECTIONS.filter((targetSection) => readySections[targetSection]).length;
+    const progress = completedSections === 0 ? 18 : 18 + completedSections * 24;
+    const activeBootstrapSection =
+      BOOTSTRAP_SECTION_SEQUENCE.find((targetSection) => !readySections[targetSection]) ??
+      LOADING_STAGES[LOADING_STAGES.length - 1];
+    const stageLabel =
+      typeof activeBootstrapSection === "string" && isDashboardSection(activeBootstrapSection)
+        ? BOOT_STAGE_BY_SECTION[activeBootstrapSection]
+        : "Opening FrCenter";
+    onBootstrapStatus?.(progress, stageLabel);
+  }, [onBootstrapStatus, readySections]);
+
+  React.useEffect(() => {
+    if (bootstrapReadySentRef.current) {
       return;
     }
     if (!REQUIRED_BOOTSTRAP_SECTIONS.every((targetSection) => readySections[targetSection])) {
       return;
     }
     bootstrapReadySentRef.current = true;
+    setPostBootFeaturesEnabled(true);
+    onBootstrapStatus?.(96, "Opening FrCenter");
     onBootstrapReady?.();
-  }, [dashboardCoreReady, onBootstrapReady, readySections, section]);
+  }, [onBootstrapReady, onBootstrapStatus, readySections]);
+
+  React.useEffect(() => {
+    writeCachedFriends(session.user.id, friends);
+  }, [friends, session.user.id]);
 
   function openOwnProfile() {
     setSelectedProfile(null);
@@ -895,14 +920,22 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("home") ? (
         <div style={{ display: section === "home" ? "block" : "none" }}>
-          <HomePanel onInitialReady={() => markSectionReady("home")} onOpenProfile={openUserProfile} token={session.token} />
+          <HomePanel
+            bootstrapEnabled={bootstrapStepIndex >= BOOTSTRAP_SECTION_SEQUENCE.indexOf("home")}
+            cacheKey={session.user.id}
+            onInitialReady={() => markSectionReady("home")}
+            onOpenProfile={openUserProfile}
+            token={session.token}
+          />
         </div>
         ) : null}
         {mountedSections.includes("chats") ? (
         <div className="section-shell section-shell-chat" style={{ display: section === "chats" ? "flex" : "none" }}>
           <ChatsPanel
             backendConfigVersion={backendConfigVersion}
+            bootstrapEnabled={bootstrapStepIndex >= BOOTSTRAP_SECTION_SEQUENCE.indexOf("chats")}
             friends={friends}
+            isActive={section === "chats"}
             me={session.user}
             onInitialReady={() => markSectionReady("chats")}
             onOpenProfile={openUserProfile}
@@ -912,7 +945,14 @@ function Dashboard({
         ) : null}
         {mountedSections.includes("friends") ? (
         <div style={{ display: section === "friends" ? "block" : "none" }}>
-          <FriendsPanel onInitialReady={() => markSectionReady("friends")} token={session.token} onFriendsChanged={setFriends} onOpenProfile={openUserProfile} />
+          <FriendsPanel
+            bootstrapEnabled={bootstrapStepIndex >= BOOTSTRAP_SECTION_SEQUENCE.indexOf("friends")}
+            initialFriends={friends}
+            onInitialReady={() => markSectionReady("friends")}
+            token={session.token}
+            onFriendsChanged={setFriends}
+            onOpenProfile={openUserProfile}
+          />
         </div>
         ) : null}
         {mountedSections.includes("games") ? (
@@ -1495,20 +1535,36 @@ function parseProfilePhotosFromPublic(profile: UserPublic | CurrentUser): Profil
   }
 }
 
-function HomePanel({ token, onInitialReady, onOpenProfile }: { token: string; onInitialReady?: SectionReadyCallback; onOpenProfile: (user: UserPublic) => void }) {
-  const [items, setItems] = React.useState<FeedPublication[]>([]);
+function HomePanel({
+  token,
+  cacheKey,
+  bootstrapEnabled,
+  onInitialReady,
+  onOpenProfile,
+}: {
+  token: string;
+  cacheKey: string;
+  bootstrapEnabled: boolean;
+  onInitialReady?: SectionReadyCallback;
+  onOpenProfile: (user: UserPublic) => void;
+}) {
+  const [items, setItems] = React.useState<FeedPublication[]>(() => readCachedFeed(cacheKey));
   const [status, setStatus] = React.useState("");
   const initialReadyRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (!bootstrapEnabled) {
+      return;
+    }
     let active = true;
-    setStatus("Загружаем публикации...");
+    setStatus(items.length > 0 ? "Обновляем публикации..." : "Загружаем публикации...");
     void listFeed(token)
       .then((response) => {
         if (!active) {
           return;
         }
         setItems(response);
+        writeCachedFeed(cacheKey, response);
         setStatus(response.length === 0 ? "Публикаций пока нет" : "");
       })
       .catch((error) => {
@@ -1527,7 +1583,7 @@ function HomePanel({ token, onInitialReady, onOpenProfile }: { token: string; on
     return () => {
       active = false;
     };
-  }, [onInitialReady, token]);
+  }, [bootstrapEnabled, cacheKey, onInitialReady, token]);
 
   return (
     <section className="tool-band single-column">
@@ -2111,18 +2167,38 @@ function getNotificationSoundName(url: string): string {
   }
 }
 
+function readCachedFeed(userId: string): FeedPublication[] {
+  return readStoredJson<FeedPublication[]>(`${FEED_CACHE_STORAGE_KEY_PREFIX}${userId}`, []);
+}
+
+function writeCachedFeed(userId: string, items: FeedPublication[]): void {
+  writeStoredJson(`${FEED_CACHE_STORAGE_KEY_PREFIX}${userId}`, items.slice(0, 60));
+}
+
+function readCachedFriends(userId: string): UserPublic[] {
+  return readStoredJson<UserPublic[]>(`${FRIENDS_CACHE_STORAGE_KEY_PREFIX}${userId}`, []);
+}
+
+function writeCachedFriends(userId: string, items: UserPublic[]): void {
+  writeStoredJson(`${FRIENDS_CACHE_STORAGE_KEY_PREFIX}${userId}`, items);
+}
+
 function FriendsPanel({
+  bootstrapEnabled,
+  initialFriends,
   onInitialReady,
   token,
   onFriendsChanged,
   onOpenProfile,
 }: {
+  bootstrapEnabled: boolean;
+  initialFriends: UserPublic[];
   onInitialReady?: SectionReadyCallback;
   token: string;
   onFriendsChanged: (friends: UserPublic[]) => void;
   onOpenProfile: (friend: UserPublic) => void;
 }) {
-  const [friends, setFriends] = React.useState<UserPublic[]>([]);
+  const [friends, setFriends] = React.useState<UserPublic[]>(initialFriends);
   const [inviteCode, setInviteCode] = React.useState("");
   const [joinCode, setJoinCode] = React.useState("");
   const [status, setStatus] = React.useState("");
@@ -2133,9 +2209,16 @@ function FriendsPanel({
   );
 
   React.useEffect(() => {
+    setFriends(initialFriends);
+  }, [initialFriends]);
+
+  React.useEffect(() => {
+    if (!bootstrapEnabled) {
+      return;
+    }
     void refreshFriends();
     void loadPersonalInviteCode();
-  }, [token]);
+  }, [bootstrapEnabled, token]);
 
   async function refreshFriends() {
     try {
@@ -2265,6 +2348,8 @@ function FriendsPanel({
 
 function ChatsPanel({
   backendConfigVersion,
+  bootstrapEnabled,
+  isActive,
   token,
   me,
   friends,
@@ -2272,6 +2357,8 @@ function ChatsPanel({
   onOpenProfile,
 }: {
   backendConfigVersion: number;
+  bootstrapEnabled: boolean;
+  isActive: boolean;
   token: string;
   me: CurrentUser;
   friends: UserPublic[];
@@ -2307,14 +2394,11 @@ function ChatsPanel({
   const [isRecordingVoice, setIsRecordingVoice] = React.useState(false);
   const [chatsLoading, setChatsLoading] = React.useState(true);
   const [chatCacheHydrated, setChatCacheHydrated] = React.useState(false);
-    const [messagesLoading, setMessagesLoading] = React.useState(false);
-    const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
-    const [messagesHasMore, setMessagesHasMore] = React.useState(false);
-    const [isMessageListAtBottom, setIsMessageListAtBottom] = React.useState(true);
-    const [messagesCursor, setMessagesCursor] = React.useState<{ id: string | null; createdAt: string | null }>({
-      id: null,
-      createdAt: null,
-    });
+  const [messagesLoading, setMessagesLoading] = React.useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = React.useState(false);
+  const [messagesHasMore, setMessagesHasMore] = React.useState(false);
+  const [isMessageListAtBottom, setIsMessageListAtBottom] = React.useState(true);
+  const [messagesOffset, setMessagesOffset] = React.useState<number | null>(null);
   const [isMobile, setIsMobile] = React.useState<boolean>(() => {
     if (typeof window === "undefined") {
       return false;
@@ -2334,16 +2418,17 @@ function ChatsPanel({
   const voiceStreamRef = React.useRef<MediaStream | null>(null);
   const voiceChunksRef = React.useRef<Blob[]>([]);
   const composerAttachmentsRef = React.useRef<ComposerAttachment[]>([]);
-    const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
-    const selectedChatIdRef = React.useRef<string>("");
+  const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
+  const selectedChatIdRef = React.useRef<string>("");
+  const previousChatCleanupRef = React.useRef<string>(selectedChatId);
     const messageRequestRef = React.useRef(0);
     const olderMessagesRequestRef = React.useRef(0);
     const skipNextAutoScrollRef = React.useRef(false);
     const isMessageListAtBottomRef = React.useRef(true);
-    const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
-    const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
-    const chatMessagePageInfoRef = React.useRef<Record<string, { id: string | null; createdAt: string | null; hasMore: boolean }>>({});
-    const chatPrefetchInFlightRef = React.useRef<Record<string, boolean>>({});
+  const decodedMessagesCacheRef = React.useRef<Record<string, Record<string, string>>>({});
+  const chatMessagesCacheRef = React.useRef<Record<string, Message[]>>({});
+  const chatMessagePageInfoRef = React.useRef<Record<string, { nextOffset: number | null; hasMore: boolean }>>({});
+  const chatPrefetchInFlightRef = React.useRef<Record<string, boolean>>({});
 
   const pinnedChatSet = React.useMemo(() => new Set(pinnedChatIds), [pinnedChatIds]);
   const visibleChats = React.useMemo(() => chats.filter((chat) => !hiddenChatIds.includes(chat.id)), [chats, hiddenChatIds]);
@@ -2432,8 +2517,11 @@ function ChatsPanel({
   }, [me.id]);
 
   React.useEffect(() => {
+    if (!bootstrapEnabled) {
+      return;
+    }
     void reloadChats();
-  }, [token]);
+  }, [bootstrapEnabled, token]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") {
@@ -2468,6 +2556,19 @@ function ChatsPanel({
   }, [selectedChatId]);
 
   React.useEffect(() => {
+    if (previousChatCleanupRef.current && previousChatCleanupRef.current !== selectedChatId) {
+      mediaRecorderRef.current?.stop();
+      voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+      voiceStreamRef.current = null;
+      mediaRecorderRef.current = null;
+      setIsRecordingVoice(false);
+      clearComposerAttachments();
+      setComposerDragActive(false);
+    }
+    previousChatCleanupRef.current = selectedChatId;
+  }, [selectedChatId]);
+
+  React.useEffect(() => {
     isMessageListAtBottomRef.current = isMessageListAtBottom;
   }, [isMessageListAtBottom]);
 
@@ -2492,6 +2593,9 @@ function ChatsPanel({
   }, [isMobile, orderedChats, selectedChatId]);
 
   React.useEffect(() => {
+    if (!bootstrapEnabled || !isActive) {
+      return;
+    }
     if (!selectedChatId) {
       setMessages([]);
       setDecodeMap({});
@@ -2499,13 +2603,13 @@ function ChatsPanel({
       setLoadingOlderMessages(false);
       setMessagesHasMore(false);
       setIsMessageListAtBottom(true);
-      setMessagesCursor({ id: null, createdAt: null });
+      setMessagesOffset(null);
       return;
     }
     setIsMessageListAtBottom(true);
     void loadChatDetails(selectedChatId);
     void loadChatMessages(selectedChatId);
-  }, [selectedChatId, token]);
+  }, [bootstrapEnabled, isActive, selectedChatId, token]);
 
   useRealtimeSubscription(
     backendConfigVersion,
@@ -2676,6 +2780,13 @@ function ChatsPanel({
   }, [me.id, selectedChatId]);
 
   React.useEffect(() => {
+    if (!selectedChatId) {
+      return;
+    }
+    void cacheRecentMessagesInTauri(selectedChatId, messages);
+  }, [messages, selectedChatId]);
+
+  React.useEffect(() => {
     if (skipNextAutoScrollRef.current) {
       skipNextAutoScrollRef.current = false;
       return;
@@ -2687,7 +2798,7 @@ function ChatsPanel({
   }, [messages.length, selectedChatId, scrollToBottom]);
 
   React.useEffect(() => {
-    if (initialReadyRef.current || !chatCacheHydrated || chatsLoading) {
+    if (initialReadyRef.current || !bootstrapEnabled || !chatCacheHydrated || chatsLoading) {
       return;
     }
     if (orderedChats.length === 0) {
@@ -2695,35 +2806,18 @@ function ChatsPanel({
       onInitialReady?.();
       return;
     }
-    if (!isMobile && !selectedChatId) {
-      return;
-    }
-    if (selectedChatId && messagesLoading) {
-      return;
-    }
-    if (selectedChatId && !chatMessagePageInfoRef.current[selectedChatId] && !chatMessagesCacheRef.current[selectedChatId]) {
+    if (!isMobile && !selectedChatId && orderedChats.length > 0) {
       return;
     }
     initialReadyRef.current = true;
     onInitialReady?.();
-  }, [chatCacheHydrated, chatsLoading, isMobile, messagesLoading, onInitialReady, orderedChats.length, selectedChatId]);
+  }, [bootstrapEnabled, chatCacheHydrated, chatsLoading, isMobile, onInitialReady, orderedChats.length, selectedChatId]);
 
   async function reloadChats() {
     setChatsLoading(true);
     try {
       const response = await listChats(token);
       setChats((previous) => mergeChatSummaries(previous, response.chats));
-      const hotChat = [...response.chats].sort(
-        (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime(),
-      )[0];
-      if (
-        hotChat &&
-        !selectedChatIdRef.current &&
-        !chatMessagesCacheRef.current[hotChat.id] &&
-        !chatPrefetchInFlightRef.current[hotChat.id]
-      ) {
-        void prefetchChatMessages(hotChat.id);
-      }
     } finally {
       setChatsLoading(false);
     }
@@ -2826,6 +2920,22 @@ function ChatsPanel({
     return nextDecoded;
   }
 
+  async function hydrateMessagesFromTauriCache(chatId: string, requestId: number): Promise<void> {
+    const cachedJson = await loadRecentMessagesFromTauri(chatId);
+    if (!cachedJson || messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
+      return;
+    }
+
+    const cachedMessages = dedupeMessagesById(await parseJsonTextInWorker<Message[]>(cachedJson));
+    if (cachedMessages.length === 0) {
+      return;
+    }
+
+    chatMessagesCacheRef.current[chatId] = cachedMessages;
+    setMessages(cachedMessages);
+    setDecodeMap(decodedMessagesCacheRef.current[chatId] ?? {});
+  }
+
   async function loadChatMessages(chatId: string) {
     const requestId = messageRequestRef.current + 1;
     messageRequestRef.current = requestId;
@@ -2837,33 +2947,27 @@ function ChatsPanel({
       setMessages(cachedMessages);
       setDecodeMap(cachedDecoded ?? {});
       setMessagesHasMore(cachedPageInfo?.hasMore ?? false);
-      setMessagesCursor({
-        id: cachedPageInfo?.id ?? null,
-        createdAt: cachedPageInfo?.createdAt ?? null,
-      });
+      setMessagesOffset(cachedPageInfo?.nextOffset ?? null);
     } else {
       setMessages([]);
       setDecodeMap({});
       setMessagesLoading(true);
+      void hydrateMessagesFromTauriCache(chatId, requestId);
     }
 
     try {
-      const response = await listChatMessages(token, chatId, { limit: 60 });
+      const response = await listChatMessages(token, chatId, { limit: MESSAGE_PAGE_SIZE });
       if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
         return;
       }
       chatMessagesCacheRef.current[chatId] = response.messages;
       chatMessagePageInfoRef.current[chatId] = {
-        id: response.next_cursor_id,
-        createdAt: response.next_cursor_created_at,
+        nextOffset: response.next_offset,
         hasMore: response.has_more,
       };
       setMessages(response.messages);
       setMessagesHasMore(response.has_more);
-      setMessagesCursor({
-        id: response.next_cursor_id,
-        createdAt: response.next_cursor_created_at,
-      });
+      setMessagesOffset(response.next_offset);
       const decoded = await decodeMessagesForChat(chatId, response.messages);
       if (messageRequestRef.current !== requestId || selectedChatIdRef.current !== chatId) {
         return;
@@ -2875,12 +2979,11 @@ function ChatsPanel({
         return;
       }
       chatMessagePageInfoRef.current[chatId] = {
-        id: null,
-        createdAt: null,
+        nextOffset: null,
         hasMore: false,
       };
       setMessagesHasMore(false);
-      setMessagesCursor({ id: null, createdAt: null });
+      setMessagesOffset(null);
       setStatus(error instanceof Error ? error.message : "Не удалось загрузить сообщения");
     } finally {
       if (messageRequestRef.current === requestId && selectedChatIdRef.current === chatId) {
@@ -2895,11 +2998,10 @@ function ChatsPanel({
     }
     chatPrefetchInFlightRef.current[chatId] = true;
     try {
-      const response = await listChatMessages(token, chatId, { limit: 40 });
+      const response = await listChatMessages(token, chatId, { limit: PREFETCH_MESSAGE_PAGE_SIZE });
       chatMessagesCacheRef.current[chatId] = response.messages;
       chatMessagePageInfoRef.current[chatId] = {
-        id: response.next_cursor_id,
-        createdAt: response.next_cursor_created_at,
+        nextOffset: response.next_offset,
         hasMore: response.has_more,
       };
       await decodeMessagesForChat(chatId, response.messages);
@@ -2911,7 +3013,7 @@ function ChatsPanel({
   }
 
   async function loadOlderMessages() {
-    if (!selectedChatId || loadingOlderMessages || !messagesHasMore || !messagesCursor.createdAt) {
+    if (!selectedChatId || loadingOlderMessages || !messagesHasMore || typeof messagesOffset !== "number") {
       return;
     }
     const requestId = olderMessagesRequestRef.current + 1;
@@ -2919,9 +3021,8 @@ function ChatsPanel({
     setLoadingOlderMessages(true);
     try {
       const response = await listChatMessages(token, selectedChatId, {
-        cursorId: messagesCursor.id,
-        cursorCreatedAt: messagesCursor.createdAt,
-        limit: 60,
+        offset: messagesOffset,
+        limit: MESSAGE_PAGE_SIZE,
       });
       if (olderMessagesRequestRef.current !== requestId || selectedChatIdRef.current !== selectedChatId) {
         return;
@@ -2935,15 +3036,11 @@ function ChatsPanel({
         return next;
       });
       chatMessagePageInfoRef.current[selectedChatId] = {
-        id: response.next_cursor_id,
-        createdAt: response.next_cursor_created_at,
+        nextOffset: response.next_offset,
         hasMore: response.has_more,
       };
       setMessagesHasMore(response.has_more);
-      setMessagesCursor({
-        id: response.next_cursor_id,
-        createdAt: response.next_cursor_created_at,
-      });
+      setMessagesOffset(response.next_offset);
     } finally {
       if (olderMessagesRequestRef.current === requestId) {
         setLoadingOlderMessages(false);
@@ -4161,26 +4258,10 @@ function useIsTauriDesktop(): boolean {
   const [desktop, setDesktop] = React.useState(false);
 
   React.useEffect(() => {
-    setDesktop(hasTauriWindowApi());
+    setDesktop(hasTauriIpc());
   }, []);
 
   return desktop;
-}
-
-function hasTauriWindowApi(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return typeof (window as TauriWindowInternals).__TAURI_INTERNALS__?.invoke === "function";
-}
-
-async function invokeTauriWindowCommand<Result = unknown>(
-  command: "minimize_window" | "toggle_maximize_window" | "close_window",
-): Promise<Result | undefined> {
-  if (!hasTauriWindowApi()) {
-    return undefined;
-  }
-  return (window as TauriWindowInternals).__TAURI_INTERNALS__!.invoke?.(command);
 }
 
 function readStoredStringList(key: string): string[] {
@@ -4202,6 +4283,26 @@ function readStoredStringList(key: string): string[] {
 function writeStoredStringList(key: string, values: string[]): void {
   try {
     localStorage.setItem(key, JSON.stringify(values));
+  } catch {
+    // ignore storage write errors
+  }
+}
+
+function readStoredJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      return fallback;
+    }
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // ignore storage write errors
   }

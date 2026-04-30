@@ -22,11 +22,13 @@ export const DEFAULT_NOTIFICATION_SOUND_URL = "https://www.myinstants.com/media/
 
 export function useNotificationsStore({
   backendConfigVersion,
+  enabled,
   token,
   currentUser,
   onFriendsChanged,
 }: {
   backendConfigVersion: number;
+  enabled: boolean;
   token: string;
   currentUser: CurrentUser;
   onFriendsChanged: (friends: UserPublic[]) => void;
@@ -73,9 +75,12 @@ export function useNotificationsStore({
   }, [token]);
 
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     void refreshNotifications();
     void refreshFriendRequests();
-  }, [refreshFriendRequests, refreshNotifications]);
+  }, [enabled, refreshFriendRequests, refreshNotifications]);
 
   React.useEffect(() => {
     if (!audioRef.current) {
@@ -109,7 +114,7 @@ export function useNotificationsStore({
     [currentUser.id, playNotificationSound, refreshFriendRequests],
   );
 
-  useRealtimeSubscription(backendConfigVersion, token, handleRealtimeEvent);
+  useRealtimeSubscription(backendConfigVersion, token, handleRealtimeEvent, enabled);
 
   const openNotifications = React.useCallback(async () => {
     setNotificationsOpen(true);

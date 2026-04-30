@@ -8,6 +8,11 @@ from collections import defaultdict
 
 from fastapi import WebSocket
 
+try:
+    import orjson
+except ImportError:
+    orjson = None
+
 
 class ConnectionManager:
     def __init__(self) -> None:
@@ -38,7 +43,8 @@ class ConnectionManager:
             self._flush_tasks[user_id] = asyncio.create_task(self._flush_user_payloads(user_id))
 
     async def broadcast_to_users(self, user_ids: list[str], payload: dict) -> None:
-        await asyncio.gather(*(self.send_to_user(user_id, payload) for user_id in user_ids))
+        unique_user_ids = tuple(dict.fromkeys(user_ids))
+        await asyncio.gather(*(self.send_to_user(user_id, payload) for user_id in unique_user_ids))
 
     async def _flush_user_payloads(self, user_id: str) -> None:
         try:
@@ -50,22 +56,20 @@ class ConnectionManager:
             if not connections:
                 return
 
-            batch_payload = json.dumps({"events": payloads}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            batch_payload = self._encode_bytes({"events": payloads})
             if len(payloads) == 1 and len(batch_payload) < self._compression_threshold:
-                message_text = json.dumps(payloads[0], separators=(",", ":"), ensure_ascii=False)
+                message_text = self._encode_text(payloads[0])
             elif len(batch_payload) >= self._compression_threshold:
                 compressed = gzip.compress(batch_payload)
-                message_text = json.dumps(
+                message_text = self._encode_text(
                     {
                         "type": "batch.compressed",
                         "encoding": "gzip+base64",
                         "payload": base64.b64encode(compressed).decode("ascii"),
-                    },
-                    separators=(",", ":"),
-                    ensure_ascii=False,
+                    }
                 )
             else:
-                message_text = json.dumps({"type": "batch", "events": payloads}, separators=(",", ":"), ensure_ascii=False)
+                message_text = self._encode_text({"type": "batch", "events": payloads})
 
             stale_connections: list[WebSocket] = []
             for websocket in connections:
@@ -78,6 +82,16 @@ class ConnectionManager:
                 self.disconnect(user_id, websocket)
         finally:
             self._flush_tasks.pop(user_id, None)
+
+    @staticmethod
+    def _encode_bytes(payload: dict) -> bytes:
+        if orjson is not None:
+            return orjson.dumps(payload)
+        return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    @classmethod
+    def _encode_text(cls, payload: dict) -> str:
+        return cls._encode_bytes(payload).decode("utf-8")
 
 
 connection_manager = ConnectionManager()

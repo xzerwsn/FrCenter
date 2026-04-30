@@ -41,9 +41,10 @@ export type ChatListResponse = {
 
 export type MessageListResponse = {
   messages: Message[];
-  next_cursor_id: string | null;
-  next_cursor_created_at: string | null;
+  next_offset: number | null;
   has_more: boolean;
+  limit: number;
+  offset: number;
 };
 
 export type SendMessagePayload = {
@@ -81,7 +82,11 @@ export async function createDirectChat(token: string, username: string): Promise
 }
 
 export async function readChat(token: string, chatId: string): Promise<Chat> {
-  return apiGet<Chat>(`/api/chats/${chatId}`, { token });
+  return apiGet<Chat>(`/api/chats/${chatId}`, {
+    token,
+    cacheKey: `chat-detail:${chatId}`,
+    cacheTtlMs: 5 * 60 * 1000,
+  });
 }
 
 export async function createGroupChat(token: string, payload: CreateGroupChatPayload): Promise<Chat> {
@@ -159,17 +164,13 @@ export async function listChatMessages(
   token: string,
   chatId: string,
   options: {
-    cursorId?: string | null;
-    cursorCreatedAt?: string | null;
+    offset?: number;
     limit?: number;
   } = {},
 ): Promise<MessageListResponse> {
   const params = new URLSearchParams();
-  if (options.cursorId) {
-    params.set("cursor_id", options.cursorId);
-  }
-  if (options.cursorCreatedAt) {
-    params.set("cursor_created_at", options.cursorCreatedAt);
+  if (typeof options.offset === "number" && options.offset > 0) {
+    params.set("offset", String(options.offset));
   }
   if (typeof options.limit === "number") {
     params.set("limit", String(options.limit));

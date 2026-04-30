@@ -1,6 +1,8 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -36,6 +38,15 @@ class ForbiddenChatAction(ChatError):
 
 class MessageNotFound(ChatError):
     pass
+
+
+@dataclass(slots=True)
+class MessagePage:
+    messages: list[dict[str, Any]]
+    next_offset: int | None
+    has_more: bool
+    limit: int
+    offset: int
 
 
 async def ensure_chat_member(db: AsyncSession, user_id: str, chat_id: str) -> None:
@@ -119,15 +130,9 @@ async def create_group_chat(
 
 
 async def get_chat(db: AsyncSession, current_user: User, chat_id: str) -> Chat:
-    await _ensure_member(db, current_user.id, chat_id)
-    result = await db.execute(
-        select(Chat)
-        .where(Chat.id == chat_id)
-        .options(selectinload(Chat.members).selectinload(ChatMember.user))
-    )
-    chat = result.scalar_one_or_none()
+    chat = await _get_chat_with_members_for_user(db, current_user.id, chat_id)
     if chat is None:
-        raise ChatNotFound
+        raise NotChatMember
     return _strip_inactive_members(chat)
 
 
@@ -136,41 +141,80 @@ async def list_messages(
     current_user: User,
     chat_id: str,
     *,
-    cursor_id: str | None = None,
-    cursor_created_at: datetime | None = None,
-    limit: int = 60,
-) -> tuple[list[Message], str | None, datetime | None, bool]:
+    limit: int = 30,
+    offset: int = 0,
+) -> MessagePage:
     await _ensure_member(db, current_user.id, chat_id)
-    query = (
-        select(Message)
-        .where(Message.chat_id == chat_id)
-        .where(Message.expires_at > datetime.now(UTC))
-        .options(joinedload(Message.sender))
-    )
-    if cursor_created_at is not None:
-        query = query.where(
-            (Message.created_at < cursor_created_at)
-            | ((Message.created_at == cursor_created_at) & (Message.id < (cursor_id or "")))
-        )
-
     safe_limit = max(1, min(limit, 100))
+    safe_offset = max(offset, 0)
     result = await db.execute(
-        query.order_by(Message.created_at.desc(), Message.id.desc()).limit(safe_limit + 1)
+        text(
+            """
+            SELECT
+                page.id,
+                page.chat_id,
+                page.ciphertext,
+                page.nonce,
+                page.message_type,
+                page.expires_at,
+                page.created_at,
+                sender.id AS sender_id,
+                sender.username AS sender_username,
+                sender.display_name AS sender_display_name,
+                sender.nickname AS sender_nickname,
+                sender.profile_status AS sender_profile_status,
+                sender.profile_banner_url AS sender_profile_banner_url,
+                sender.profile_background_url AS sender_profile_background_url,
+                sender.profile_photos AS sender_profile_photos,
+                sender.avatar_ring_style AS sender_avatar_ring_style,
+                sender.avatar_url AS sender_avatar_url,
+                sender.status AS sender_status,
+                sender.current_game AS sender_current_game
+            FROM (
+                SELECT
+                    m.id,
+                    m.chat_id,
+                    m.sender_id,
+                    m.ciphertext,
+                    m.nonce,
+                    m.message_type,
+                    m.expires_at,
+                    m.created_at
+                FROM messages AS m
+                WHERE m.chat_id = :chat_id
+                  AND m.expires_at > :now_utc
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT :page_limit OFFSET :page_offset
+            ) AS page
+            JOIN users AS sender ON sender.id = page.sender_id
+            ORDER BY page.created_at ASC, page.id ASC
+            """
+        ),
+        {
+            "chat_id": chat_id,
+            "now_utc": datetime.now(UTC),
+            "page_limit": safe_limit + 1,
+            "page_offset": safe_offset,
+        },
     )
-    rows = list(result.scalars().all())
+    rows = list(result.mappings().all())
     has_more = len(rows) > safe_limit
-    page = rows[:safe_limit]
-    page.reverse()
-    next_cursor_id = page[0].id if has_more and page else None
-    next_cursor_created_at = page[0].created_at if has_more and page else None
-    return page, next_cursor_id, next_cursor_created_at, has_more
+    page_rows = rows[1:] if has_more else rows
+    next_offset = safe_offset + safe_limit if has_more else None
+    return MessagePage(
+        messages=[_serialize_message_row(row) for row in page_rows],
+        next_offset=next_offset,
+        has_more=has_more,
+        limit=safe_limit,
+        offset=safe_offset,
+    )
 
 
 async def mark_chat_read(db: AsyncSession, user_id: str, chat_id: str) -> None:
-    await _ensure_member(db, user_id, chat_id)
     member = await _get_active_member(db, chat_id, user_id)
-    if member is not None:
-        member.unread_count = 0
+    if member is None:
+        raise NotChatMember
+    member.unread_count = 0
     await db.execute(
         update(MessageRecipient)
         .where(
@@ -189,8 +233,10 @@ async def mark_chat_read(db: AsyncSession, user_id: str, chat_id: str) -> None:
 
 
 async def get_active_member_ids(db: AsyncSession, chat_id: str) -> list[str]:
-    members = await _get_active_members(db, chat_id)
-    return [member.user_id for member in members]
+    result = await db.execute(
+        select(ChatMember.user_id).where(ChatMember.chat_id == chat_id, ChatMember.left_at.is_(None))
+    )
+    return list(result.scalars().all())
 
 
 async def send_message(
@@ -511,6 +557,21 @@ async def _get_chat_with_members(db: AsyncSession, chat_id: str) -> Chat | None:
     return result.scalar_one_or_none()
 
 
+async def _get_chat_with_members_for_user(db: AsyncSession, user_id: str, chat_id: str) -> Chat | None:
+    result = await db.execute(
+        select(Chat)
+        .join(
+            ChatMember,
+            (ChatMember.chat_id == Chat.id)
+            & (ChatMember.user_id == user_id)
+            & ChatMember.left_at.is_(None),
+        )
+        .where(Chat.id == chat_id)
+        .options(selectinload(Chat.members).selectinload(ChatMember.user))
+    )
+    return result.scalar_one_or_none()
+
+
 async def _get_direct_chat_peers(db: AsyncSession, current_user_id: str, chat_ids: list[str]) -> dict[str, User]:
     if not chat_ids:
         return {}
@@ -527,9 +588,11 @@ async def _get_direct_chat_peers(db: AsyncSession, current_user_id: str, chat_id
 
 
 async def _set_group_key_for_active_members(db: AsyncSession, chat_id: str, encrypted_group_key: str) -> None:
-    members = await _get_active_members(db, chat_id)
-    for member in members:
-        member.encrypted_group_key = encrypted_group_key
+    await db.execute(
+        update(ChatMember)
+        .where(ChatMember.chat_id == chat_id, ChatMember.left_at.is_(None))
+        .values(encrypted_group_key=encrypted_group_key)
+    )
 
 
 async def _get_message_in_chat(db: AsyncSession, chat_id: str, message_id: str) -> Message | None:
@@ -550,3 +613,29 @@ def _ordered_pair(user_a_id: str, user_b_id: str) -> tuple[str, str]:
 def _strip_inactive_members(chat: Chat) -> Chat:
     chat.members = [member for member in chat.members if member.left_at is None]
     return chat
+
+
+def _serialize_message_row(row: Any) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "chat_id": row["chat_id"],
+        "ciphertext": row["ciphertext"],
+        "nonce": row["nonce"],
+        "message_type": row["message_type"],
+        "expires_at": row["expires_at"],
+        "created_at": row["created_at"],
+        "sender": {
+            "id": row["sender_id"],
+            "username": row["sender_username"],
+            "display_name": row["sender_display_name"],
+            "nickname": row["sender_nickname"],
+            "profile_status": row["sender_profile_status"],
+            "profile_banner_url": row["sender_profile_banner_url"],
+            "profile_background_url": row["sender_profile_background_url"],
+            "profile_photos": row["sender_profile_photos"],
+            "avatar_ring_style": row["sender_avatar_ring_style"],
+            "avatar_url": row["sender_avatar_url"],
+            "status": row["sender_status"],
+            "current_game": row["sender_current_game"],
+        },
+    }

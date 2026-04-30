@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import ORJSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -30,6 +31,7 @@ from app.services.chat_service import (
     NotChatMember,
     NotFriends,
     UserNotFound,
+    MessagePage,
     add_group_member,
     create_direct_chat,
     create_group_chat,
@@ -156,7 +158,7 @@ async def edit_message(
             payload.message_type,
         )
         member_ids = await get_active_member_ids(db, chat_id)
-        message_payload = MessageResponse.model_validate(message).model_dump(mode="json")
+        message_payload = MessageResponse.model_validate(message).model_dump(mode="json", exclude_unset=True)
         await connection_manager.broadcast_to_users(
             member_ids,
             {
@@ -256,30 +258,30 @@ async def read_chat(
         raise HTTPException(status_code=404, detail="Chat not found") from exc
 
 
-@router.get("/{chat_id}/messages", response_model=MessageListResponse)
+@router.get("/{chat_id}/messages", response_class=ORJSONResponse)
 async def read_messages(
     chat_id: str,
-    cursor_id: str | None = Query(default=None),
-    cursor_created_at: datetime | None = Query(default=None),
-    limit: int = Query(default=60, ge=1, le=100),
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    stream: bool = Query(default=False),
+    chunk_size: int = Query(default=25, ge=1, le=50),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> MessageListResponse:
+) -> ORJSONResponse | StreamingResponse:
     try:
-        messages, next_cursor_id, next_cursor_created_at, has_more = await list_messages(
+        page = await list_messages(
             db,
             current_user,
             chat_id,
-            cursor_id=cursor_id,
-            cursor_created_at=cursor_created_at,
             limit=limit,
+            offset=offset,
         )
-        return MessageListResponse(
-            messages=[MessageResponse.model_validate(message) for message in messages],
-            next_cursor_id=next_cursor_id,
-            next_cursor_created_at=next_cursor_created_at,
-            has_more=has_more,
-        )
+        if stream:
+            return StreamingResponse(
+                _stream_message_page(page, chunk_size=chunk_size),
+                media_type="application/json",
+            )
+        return ORJSONResponse(_serialize_message_page(page))
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Chat not found") from exc
 
@@ -302,7 +304,7 @@ async def create_message(
             payload.encrypted_message_keys,
         )
         member_ids = await get_active_member_ids(db, chat_id)
-        message_payload = MessageResponse.model_validate(message).model_dump(mode="json")
+        message_payload = MessageResponse.model_validate(message).model_dump(mode="json", exclude_unset=True)
         await connection_manager.broadcast_to_users(
             member_ids,
             {
@@ -326,3 +328,43 @@ async def read_chat_messages(
         await mark_chat_read(db, current_user.id, chat_id)
     except NotChatMember as exc:
         raise HTTPException(status_code=404, detail="Chat not found") from exc
+
+
+def _serialize_message_page(page: MessagePage) -> dict:
+    return {
+        "messages": page.messages,
+        "next_offset": page.next_offset,
+        "has_more": page.has_more,
+        "limit": page.limit,
+        "offset": page.offset,
+    }
+
+
+async def _stream_message_page(page: MessagePage, *, chunk_size: int):
+    try:
+        import orjson
+    except ImportError:
+        import json
+
+        def dumps(value: object) -> bytes:
+            return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    else:
+        dumps = orjson.dumps
+
+    yield b'{"messages":['
+    message_count = len(page.messages)
+    for index in range(0, message_count, chunk_size):
+        chunk = page.messages[index : index + chunk_size]
+        encoded = dumps(chunk)
+        if index > 0:
+            yield b","
+        yield encoded[1:-1]
+    metadata = dumps(
+        {
+            "next_offset": page.next_offset,
+            "has_more": page.has_more,
+            "limit": page.limit,
+            "offset": page.offset,
+        }
+    ).decode("utf-8")
+    yield f"],{metadata[1:]}".encode("utf-8")

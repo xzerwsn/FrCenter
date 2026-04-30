@@ -1,4 +1,5 @@
 import { getBackendWebSocketBaseUrl } from "../config/backend-url";
+import { parseRealtimePayloadInWorker } from "../app/transport-worker-client";
 
 export type RealtimeEvent =
   | {
@@ -109,17 +110,8 @@ function ensureConnected(): void {
 
   socket.onmessage = async (event) => {
     try {
-      const payload = JSON.parse(event.data) as RealtimeEnvelope;
-      if (payload.type === "batch" && Array.isArray(payload.events)) {
-        publishEvents(payload.events);
-        return;
-      }
-      if (payload.type === "batch.compressed" && payload.encoding === "gzip+base64" && typeof payload.payload === "string") {
-        const events = await decompressEvents(payload.payload);
-        publishEvents(events);
-        return;
-      }
-      publishEvents([payload]);
+      const events = await parseRealtimePayloadInWorker<RealtimeEvent>(event.data as string);
+      publishEvents(events);
     } catch {
       // Ignore malformed payloads in this prototype stage.
     }
@@ -185,28 +177,4 @@ function clearHeartbeat(): void {
     window.clearInterval(sharedState.heartbeatTimer);
     sharedState.heartbeatTimer = undefined;
   }
-}
-
-async function decompressEvents(payload: string): Promise<RealtimeEvent[]> {
-  const compressed = base64ToBytes(payload);
-  const buffer = toArrayBuffer(compressed);
-  const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream("gzip"));
-  const text = await new Response(stream).text();
-  const decoded = JSON.parse(text) as { events?: RealtimeEvent[] };
-  return Array.isArray(decoded.events) ? decoded.events : [];
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
 }
